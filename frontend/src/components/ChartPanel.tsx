@@ -19,7 +19,7 @@ export function ChartPanel({ title, data, variant = 'bar' }: Props) {
         ) : variant === 'pie' ? (
           <ResponsiveContainer width="100%" height={230}>
             <PieChart>
-              <Pie data={data} dataKey="value" nameKey="name" innerRadius={52} outerRadius={84} paddingAngle={2}>
+              <Pie data={data} dataKey="value" nameKey="name" innerRadius={52} outerRadius={84} paddingAngle={2} isAnimationActive={false}>
                 {data.map((_, index) => (
                   <Cell key={index} fill={COLORS[index % COLORS.length]} />
                 ))}
@@ -34,7 +34,7 @@ export function ChartPanel({ title, data, variant = 'bar' }: Props) {
               <XAxis dataKey="name" angle={-28} textAnchor="end" interval={0} height={60} tick={{ fontSize: 12 }} />
               <YAxis allowDecimals={false} />
               <Tooltip />
-              <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+              <Bar dataKey="value" radius={[4, 4, 0, 0]} isAnimationActive={false}>
                 {data.map((_, index) => (
                   <Cell key={index} fill={COLORS[index % COLORS.length]} />
                 ))}

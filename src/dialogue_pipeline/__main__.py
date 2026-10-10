@@ -30,6 +30,13 @@ def main(argv: list[str] | None = None) -> int:
     report_parser.add_argument("--version", required=True)
     report_parser.add_argument("--output", required=True, type=Path)
 
+    catalog_parser = subparsers.add_parser("catalog-add", help="Store a raw JSONL dataset for dashboard runs.")
+    catalog_parser.add_argument("--input", required=True, type=Path)
+    catalog_parser.add_argument("--db", type=Path, default=Path("artifacts/web/dashboard.sqlite"))
+    catalog_parser.add_argument("--name")
+    catalog_parser.add_argument("--profile", choices=("default", "oasst1"), default="default")
+    catalog_parser.add_argument("--origin", choices=("local", "public"), default="local")
+
     for command, help_text in (
         ("labels-template", "Export an empty review CSV and dialogue context."),
         ("labels-import", "Validate and atomically import review labels."),
@@ -62,6 +69,17 @@ def main(argv: list[str] | None = None) -> int:
             command_parser.add_argument("--output-reserve", type=int, default=256)
 
     args = parser.parse_args(argv)
+    if args.command == "catalog-add":
+        from .catalog import MAX_SOURCE_BYTES, register_source
+        try:
+            with args.input.open("rb") as file_obj:
+                content = file_obj.read(MAX_SOURCE_BYTES + 1)
+            source = register_source(args.db, content, args.input.name, args.profile, args.name, args.origin)
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            print(f"catalog-add failed: {exc}", file=sys.stderr)
+            return 1
+        print(f"catalog source saved: source_id={source['source_id']} rows={source['row_count']} profile={source['profile']}")
+        return 0
     if args.command == "check":
         return run_check(args.input, args.output, args.config, args.strict)
     if args.command == "run":

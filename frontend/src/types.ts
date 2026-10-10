@@ -18,11 +18,29 @@ export type Run = {
   finished_at: string;
   status: string;
   summary: Summary;
+  source_id: string | null;
+  source_name: string | null;
 };
+
+export type Source = {
+  source_id: string;
+  name: string;
+  filename: string;
+  origin: 'upload' | 'local' | 'public';
+  profile: 'default' | 'oasst1';
+  content_sha256: string;
+  byte_count: number;
+  row_count: number;
+  created_at: string;
+  latest_run_id: string | null;
+};
+
+export type Page<T> = { total: number; items: T[] };
 
 export type CreateRunResponse = {
   run_id: string;
   upload_id: string;
+  source_id: string;
   dataset_version: string;
   summary: Summary;
 };

@@ -9,7 +9,8 @@
 - `split.py`：用 `group_id` 和 `content_hash` 构建泄漏组，并稳定划分 train / validation / test。
 - `pipeline.py`：编排读取、验证、清洗、去重，生成文件输出和数据库写入共用的处理结果。
 - `storage.py`：使用 SQLite 保存数据版本、运行记录、保留样本和每条输入最终处置。
-- `api.py`：FastAPI 薄后端，负责上传文件、调用 pipeline、写入 SQLite，并提供 dashboard 查询接口。
+- `catalog.py`：保存原始 JSONL 字节与来源元数据，按内容哈希和配置名称去重。
+- `api.py`：FastAPI 薄后端，负责数据集上传与选择运行、调用 pipeline、写入 SQLite，并提供 dashboard 查询接口。
 - `__main__.py`：提供 `check` 和 `run` CLI。
 
 ## S1 关键取舍
@@ -48,6 +49,8 @@
 - `runs`：保存每次运行的 `run_id`、开始/结束时间和状态。
 - `records`：保存最终保留的清洗后样本，主键为 `(dataset_version, sample_id)`。
 - `dispositions`：保存每条非空输入行的最终处置，主键为 `(dataset_version, source_file_hash, line_number)`。
+- `raw_sources`：保存可重复处理的原始 JSONL BLOB、文件名、来源、配置名称、SHA-256、字节数与非空行数。
+- `source_runs`：连接原始数据集和处理运行，与运行结果在同一事务中写入。
 
 `dataset_version` 由输入文件哈希、配置哈希和源码哈希生成。同一版本重复运行时，`records` 和 `dispositions` 会先按 `dataset_version` 删除再重写，因此不会翻倍；`runs` 表保留每次运行历史。
 
@@ -85,19 +88,25 @@
 API 层只做薄封装：
 
 - 接收 `.jsonl` 上传。
-- 保存上传文件到 `artifacts/web/uploads/`。
+- 将原始字节存入 SQLite，处理时原子恢复到 `artifacts/web/uploads/`。
+- 按 source_id 读取原始内容和绑定的配置，支持重复运行与原文件下载。
 - 调用 `process_input()`。
 - 调用 `save_result()` 写入 `artifacts/web/dashboard.sqlite`。
-- 提供 runs、records、rejected 和统计查询接口。
+- 提供 sources、按数据集筛选的 runs、分页 records/rejected 和全量统计接口。
 
 React 前端只负责展示和交互：
 
-- 上传 JSONL。
+- 从下拉框选择已有 JSONL 数据集，查看其历史结果或重新运行。
+- 选择上传配置并上传 JSONL，保存后立即运行。
 - 展示 summary cards。
 - 展示 status/topic/rule 图表。
 - 展示 split 分布图。
-- 展示 cleaned 和 rejected 表格。
-- 点击行查看详情 JSON。
+- 展示 cleaned 和 rejected 分页表格，每页 50 条，总量由 API 返回。
+- 查看对话、隔离原因与详情 JSON；切换数据集或运行时重置页码和选择，取消过期查询。
+
+原始数据集、处理版本和运行记录是三种不同对象：同一输入与配置名称对应一个 source；输入、配置内容或流水线源码变化会生成新的 dataset_version；每次执行都有新的 run_id。同一版本重复运行不会让记录翻倍。原始字节保存在数据库而非仅引用路径，删除下载目录不影响再次运行；许可与上游血缘清单仍由公开数据适配器保存在原下载目录。
+
+`catalog-add` 用于显式登记适配器下载结果，API 启动不下载远程数据。旧版上传仅在路径属于上传目录、原文件存在且哈希一致时建立来源关联，不将清洗结果伪装成原始输入。处理是同步请求，面向本地单用户和数千条样本；20 MiB 文件限制控制单次输入规模，多用户或长任务需求出现后再引入任务队列与认证。
 
 ## 后续设计点
 

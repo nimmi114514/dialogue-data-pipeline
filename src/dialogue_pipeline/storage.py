@@ -29,7 +29,9 @@ CREATE TABLE IF NOT EXISTS labels (
 """
 
 
-def save_result(db_path: Path, result: PipelineResult, config: dict[str, Any]) -> str:
+def save_result(
+    db_path: Path, result: PipelineResult, config: dict[str, Any], source_id: str | None = None,
+) -> str:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     run_id = uuid.uuid4().hex
     started_at = _utc_now()
@@ -59,6 +61,11 @@ def save_result(db_path: Path, result: PipelineResult, config: dict[str, Any]) -
                     result.summary["status"],
                 ),
             )
+            if source_id is not None:
+                connection.execute(
+                    "INSERT INTO source_runs (run_id, source_id) VALUES (?, ?)",
+                    (run_id, source_id),
+                )
     return run_id
 
 

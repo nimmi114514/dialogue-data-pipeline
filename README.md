@@ -202,13 +202,41 @@ http://localhost:5173
 export NO_PROXY=127.0.0.1,localhost
 ```
 
-前端会把 `/api` 请求代理到 `http://127.0.0.1:8000`。后端会把上传文件、运行产物和 dashboard SQLite 写到：
+前端会把 `/api` 请求代理到 `http://127.0.0.1:8000`。原始 JSONL 字节与元数据保存在 dashboard SQLite；处理时恢复输入副本，并保存运行产物：
 
 ```text
 artifacts/web/
 ```
 
-选择运行记录后，可在数据版本旁下载 JSON 或 Markdown 质量报告。报告从该版本的数据库记录生成，历史运行也可使用。
+页面顶部的数据集下拉框列出数据库中的原始数据集。选择数据集会展示其最近一次结果与运行历史；点击 `Run dataset` 可重新处理。`Upload & run` 将新文件入库并立即处理，之后也能从下拉框再次选择。上传支持 UTF-8 JSONL，单文件上限为 20 MiB；坏 JSON 行由流水线隔离，不阻断后续记录。
+
+`Upload profile` 可选择 Standard 或 OASST1。OASST1 配置允许 `other` 主题；数据集保存时绑定所选配置名称，重新运行使用该配置文件的当前内容。同一文件内容与同一配置名称只保存一个原始数据集，重复运行则产生独立历史记录。
+
+保留记录与隔离/重复记录分别分页，每页 50 条，可跳到首页或末页。选择记录可查看对话、规则原因及 JSON；图表和总数使用完整数据，而非当前页。数据版本旁可下载 JSON 或 Markdown 质量报告，数据集旁可下载原始 JSONL。
+
+将本地 JSONL 加入网页目录，不需要重新上传或修改数据库路径：
+
+```bash
+python -m dialogue_pipeline catalog-add \
+  --input artifacts/oasst-practice/source/dialogues.jsonl \
+  --name "OpenAssistant OASST1 - Chinese 1000" \
+  --profile oasst1 --origin public
+```
+
+该命令默认写入 `artifacts/web/dashboard.sqlite`，只登记数据集，不执行清洗；刷新网页后选择它并运行。公开数据下载方法见下文。已有 dashboard 的历史上传会在 API 启动时迁移到数据集目录，前提是输入副本仍存在且哈希一致；缺失的原始文件不会由清洗结果反推。
+
+主要接口：
+
+| 接口 | 用途 |
+| --- | --- |
+| `GET /api/sources` | 列出原始数据集与最近运行 ID |
+| `POST /api/sources` | multipart `file`、`profile`，仅保存上传 |
+| `POST /api/sources/{source_id}/runs` | 重新运行已保存的数据集 |
+| `POST /api/runs` | multipart `file`、`profile`，上传并运行 |
+| `GET /api/runs?source_id=...` | 查询该数据集的运行历史 |
+| `GET /api/sources/{source_id}/download` | 下载原始 JSONL |
+
+API 文档位于 `http://127.0.0.1:8000/docs`。当前服务用于本地单用户工作流，没有身份认证，不应直接暴露到公网。
 
 ## 运行并写入 SQLite
 

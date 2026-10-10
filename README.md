@@ -1,6 +1,6 @@
 # dialogue-data-pipeline
 
-中文对话数据流水线学习项目，用一个可本地运行的小型工程演示对话数据从原始 JSONL 到结构检查、异常隔离和质量记录的第一步处理流程。
+中文对话数据流水线学习项目，用一个可本地运行的小型工程演示对话数据从原始 JSONL 到结构检查、清洗脱敏、去重隔离和质量记录的早期处理流程。
 
 这个项目面向初级数据工程相关岗位准备，重点不是训练模型，而是把数据工程中经常被问到、也容易被忽略的基础问题做清楚：数据从哪里来、格式是否稳定、坏数据如何隔离、每条输入如何追溯、统计结果是否来自真实运行。
 
@@ -14,7 +14,7 @@
 - 清洗或筛选后无法追溯到原始文件和具体行号。
 - 运行结果只写在 README 里，没有可复现的产出文件。
 
-本项目先实现一个窄而真实的 S1 阶段：读取本地 JSONL，对每条中文对话做结构验证，把通过记录和异常记录分别导出。后续阶段会逐步加入清洗、脱敏、去重、SQLite、SQL 分析、泄漏组划分、人工标注和质量报告。
+本项目当前实现到 S2：读取本地 JSONL，对每条中文对话做结构验证，再对结构合格的数据进行规范化、模拟邮箱/手机号脱敏、内容哈希、精确去重和 `sample_id` 冲突隔离。后续阶段会逐步加入 SQLite、SQL 分析、泄漏组划分、人工标注和质量报告。
 
 ## 当前已实现
 
@@ -39,7 +39,18 @@ S1 读取与验证：
   - `summary.json`
 - 添加基础 pytest 测试，覆盖坏 JSON 后继续读取、空行计数、合法多轮对话、非法角色顺序、类型错误和空内容。
 
-当前还没有实现清洗、脱敏、去重、数据库、划分、人工审核和看板；这些会按阶段推进，不在 README 里伪装成已完成。
+S2 清洗与去重：
+
+- 对结构合格的消息内容做 Unicode NFC 规范化。
+- 统一换行符为 `\n`。
+- 清理消息首尾空白，但保留消息内部换行和格式。
+- 用配置里的正则规则把模拟邮箱替换为 `[EMAIL]`。
+- 用配置里的正则规则把模拟手机号替换为 `[PHONE]`。
+- 基于规范化后的 `messages` 计算稳定 SHA-256 内容哈希。
+- 对规范化和脱敏后的完全相同对话做精确去重，保留输入顺序中最早的一条。
+- 对同一个 `sample_id` 对应多个不同内容哈希的记录全部隔离，避免按偶然顺序保留错误内容。
+
+当前还没有实现 SQLite、SQL 分析、划分、人工审核和看板；这些会按阶段推进，不在 README 里伪装成已完成。
 
 ## 项目结构
 
@@ -60,6 +71,8 @@ dialogue-data-pipeline/
     dialogue_pipeline/
       __init__.py
       __main__.py
+      clean.py
+      deduplicate.py
       ingest.py
       validate.py
   tests/
@@ -85,15 +98,19 @@ dialogue-data-pipeline/
 - 不支持语言
 - 未知主题
 - `messages` 类型错误
-- S2 才会处理的重复 `sample_id` 示例
+- 同 `sample_id` 不同内容冲突
+- 首尾空白清理后的重复内容
+- 含模拟邮箱和手机号的脱敏样例
 
-S1 样例预期：
+当前样例预期：
 
 ```text
-candidate_lines = 22
+candidate_lines = 24
 blank_lines = 1
-accepted_count = 14
-rejected_count = 8
+kept_count = 13
+duplicate_count = 1
+quarantined_count = 10
+rejected_count = 11
 ```
 
 ## 环境要求
@@ -135,7 +152,7 @@ PYTHONPATH=src python -m dialogue_pipeline check \
 成功时会看到类似输出：
 
 ```text
-check completed: accepted=14 rejected=8 blank_lines=1 output=artifacts/check
+check completed: kept=13 duplicate=1 quarantined=10 blank_lines=1 output=artifacts/check
 ```
 
 ### 严格模式
@@ -155,15 +172,21 @@ python -m dialogue_pipeline check \
 
 ```text
 artifacts/check/
+  cleaned.jsonl
   accepted.jsonl
   rejected.jsonl
   summary.json
 ```
 
-`accepted.jsonl` 示例结构：
+`cleaned.jsonl` 和 `accepted.jsonl` 保存最终保留记录。`accepted.jsonl` 暂时保留为兼容名称，后续核心流程会以 `cleaned.jsonl` 为主。
+
+`cleaned.jsonl` 示例结构：
 
 ```json
 {
+  "char_count": 31,
+  "cleaning_events": [],
+  "content_hash": "...",
   "line_number": 1,
   "record": {
     "sample_id": "schedule_001",
@@ -178,12 +201,13 @@ artifacts/check/
 }
 ```
 
-`rejected.jsonl` 会保留原始行文本和规则原因，例如：
+`rejected.jsonl` 会保留原始行文本、最终处置状态和规则原因，例如：
 
 ```json
 {
   "line_number": 14,
   "raw_text": "...",
+  "status": "quarantined",
   "reasons": [
     {
       "rule_id": "JSON_PARSE_ERROR",
@@ -194,7 +218,7 @@ artifacts/check/
 }
 ```
 
-`summary.json` 会记录候选行、空白行、通过数量、拒绝数量和规则计数。
+`summary.json` 会记录候选行、空白行、保留数量、重复数量、隔离数量、规则计数和清洗事件计数。
 
 ## 运行测试
 
@@ -205,7 +229,7 @@ python -m pytest
 当前验证结果：
 
 ```text
-4 passed
+7 passed
 ```
 
 ## 如何实现
@@ -229,6 +253,25 @@ python -m pytest
 
 验证失败会返回机器可读的规则 ID、字段路径和中文原因。这样后续写入数据库、质量报告或看板时，不需要重新猜测错误类型。
 
+### 清洗层
+
+`src/dialogue_pipeline/clean.py` 对结构合格的记录做可解释的自动处理：
+
+1. 规范化 Unicode。
+2. 统一换行。
+3. 清理消息首尾空白。
+4. 替换模拟邮箱和手机号。
+5. 计算只基于 `messages` 的稳定内容哈希。
+
+项目不会把数字 `content` 自动转成字符串，也不会自动补全缺失的 assistant，因为这类修复属于猜测式转换，容易掩盖上游数据问题。
+
+### 去重层
+
+`src/dialogue_pipeline/deduplicate.py` 处理跨记录关系：
+
+1. 如果同一个 `sample_id` 对应多个不同内容哈希，相关记录全部隔离为 `SAMPLE_ID_CONFLICT`。
+2. 如果不同记录的规范化内容哈希相同，只保留输入顺序中最早的一条，其余标记为 `DUPLICATE_CONTENT`。
+
 ### CLI 层
 
 `src/dialogue_pipeline/__main__.py` 提供 `check` 命令：
@@ -236,25 +279,26 @@ python -m pytest
 1. 读取配置。
 2. 调用 JSONL 读取。
 3. 对成功解析的记录执行结构验证。
-4. 写出通过记录、拒绝记录和摘要。
-5. 根据是否开启 `--strict` 返回不同退出码。
+4. 对结构合格记录做清洗、脱敏和内容哈希。
+5. 处理 `sample_id` 冲突和精确重复。
+6. 写出保留记录、隔离/重复记录和摘要。
+7. 根据是否开启 `--strict` 返回不同退出码。
 
 ## 规则边界
 
-当前阶段只做结构检查。
+当前阶段已经做到结构检查、规则清洗、模拟脱敏和精确去重。
 
-结构检查通过不代表：
+当前通过检查不代表：
 
 - 回答一定有帮助。
 - 回答事实一定正确。
 - 数据适合直接训练模型。
 - 训练集、验证集和测试集之间没有泄漏。
 
-例如样例中的 `duplicate_id_demo` 两条记录在 S1 会通过，因为同 ID 不同内容冲突需要扫描完整数据集，属于 S2 清洗与去重阶段。
+例如一条问答虽然结构正确，也可能回答跑题；这类问题属于后续人工审核阶段。
 
 ## 后续计划
 
-- S2：文本规范化、模拟邮箱和手机号脱敏、内容哈希、精确去重、`sample_id` 冲突隔离。
 - S3：SQLite 存储、事务写入、重复运行不重复插入、SQL 分析。
 - S4：泄漏组归并、稳定 train/validation/test 划分、基础导出。
 - S5：人工标签 CSV、标签校验、审核通过数据导出、质量报告。
@@ -266,6 +310,7 @@ python -m pytest
 
 - 能处理半结构化 JSONL 数据。
 - 能把坏数据隔离而不是让整个流程崩溃。
+- 能做规则明确的规范化、脱敏和精确去重。
 - 能区分结构规则、人工质量审核和模型效果评估。
 - 能保留行号、输入哈希和规则 ID，方便追溯。
 - 能用测试验证关键边界，而不是只手工检查一次。

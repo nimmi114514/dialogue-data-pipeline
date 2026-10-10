@@ -28,5 +28,35 @@ python -m dialogue_pipeline check --input data/samples/raw_dialogues.jsonl --out
 
 ### 待完成
 
-- S2 清洗与去重：规范化、脱敏、内容哈希、重复记录和 ID 冲突处理。
+- S2 清洗与去重已在后续记录完成。
 - 初始化 Git 仓库并提交前检查公开内容。
+
+## 2026-10-10 S2 清洗与去重
+
+### 已完成
+
+- 新增 `clean.py`：NFC 规范化、换行统一、消息首尾空白清理、模拟邮箱/手机号脱敏、内容哈希。
+- 新增 `deduplicate.py`：按内容哈希精确去重；同 `sample_id` 不同内容全部隔离。
+- `check` 命令现在输出 `cleaned.jsonl`、兼容用 `accepted.jsonl`、`rejected.jsonl` 和 `summary.json`。
+- 样例数据扩展到 24 条非空候选行，新增首尾空白重复样例和模拟联系方式脱敏样例。
+- 测试扩展到 7 条，覆盖清洗、哈希和去重冲突。
+
+### 实际运行命令
+
+```bash
+python -m pytest
+python -m dialogue_pipeline check --input data/samples/raw_dialogues.jsonl --output artifacts/check-s2
+```
+
+### 当前结果
+
+- CLI 检查输出：`kept=13 duplicate=1 quarantined=10 blank_lines=1`。
+- `artifacts/check-s2/summary.json`：`candidate_lines=24`、`blank_lines=1`、`kept_count=13`、`duplicate_count=1`、`quarantined_count=10`、`rejected_count=11`。
+- 清洗事件计数：`NORMALIZED_TEXT=2`、`REDACTED_EMAIL=2`、`REDACTED_PHONE=2`。
+- 规则计数新增：`DUPLICATE_CONTENT=1`、`SAMPLE_ID_CONFLICT=2`。
+- 测试：`7 passed in 0.25s`。
+
+### 待完成
+
+- S3 SQLite 与 SQL：版本表、记录表、处置表、重复运行不翻倍、基础 SQL 分析。
+- 对 README 做一次全新 clone 后复现检查。

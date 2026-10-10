@@ -1,11 +1,16 @@
 {
   "s1_expected": {
-    "candidate_lines": 22,
+    "candidate_lines": 24,
     "blank_lines": 1,
-    "accepted_count": 14,
-    "rejected_count": 8,
+    "accepted_count": 13,
+    "kept_count": 13,
+    "duplicate_count": 1,
+    "quarantined_count": 10,
+    "rejected_count": 11,
     "notes": [
-      "duplicate_id_demo 的两条记录在 S1 结构检查中通过；S2 才处理跨记录 ID 冲突。",
+      "duplicate_id_demo 的两条记录结构合格，但在 S2 因同 sample_id 对应不同内容而全部隔离。",
+      "schedule_001_copy 首尾空白清理后与 schedule_001 内容相同，因此应作为 DUPLICATE_CONTENT。",
+      "privacy_001 结构合格，模拟邮箱和手机号应被替换为 [EMAIL] 和 [PHONE]。",
       "missing_field_001 有 messages 字段，但缺少 assistant，因此应触发 INVALID_ROLE_SEQUENCE。",
       "bad_json_001 的物理行故意不是合法 JSON，用于验证坏行不阻断后续读取。"
     ],
@@ -17,7 +22,9 @@
       "bad_role_order_001": ["INVALID_ROLE_SEQUENCE"],
       "unsupported_language_001": ["UNSUPPORTED_LANGUAGE"],
       "unknown_topic_001": ["UNKNOWN_TOPIC"],
-      "messages_type_001": ["INVALID_TYPE"]
+      "messages_type_001": ["INVALID_TYPE"],
+      "duplicate_id_demo": ["SAMPLE_ID_CONFLICT"],
+      "schedule_001_copy": ["DUPLICATE_CONTENT"]
     }
   }
 }

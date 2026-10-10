@@ -30,3 +30,9 @@ JSONL 的好处是每行独立。第 14 行坏了，不应该导致第 15 行之
 
 1. 在 `data/samples/raw_dialogues.jsonl` 末尾新增一条合法的 `topic=study` 对话，运行 `python -m dialogue_pipeline check --input data/samples/raw_dialogues.jsonl --output artifacts/check-practice`，观察 `accepted_count` 是否加 1。
 2. 把一条合法样例的最后一条 `assistant` 改成 `user`，再次运行 check，查看 `rejected.jsonl` 中对应行的 `rule_id` 和 `field_path`。
+
+## S2 练习
+
+1. 复制一条合法记录，换一个新的 `sample_id`，但只给消息内容前后加空格。运行 check，观察它是否进入 `DUPLICATE_CONTENT`。
+2. 新增两条相同 `sample_id` 但不同 `messages` 的记录。运行 check，确认两条都被 `SAMPLE_ID_CONFLICT` 隔离，而不是保留第一条。
+3. 在一条合法记录里加入模拟邮箱和手机号，观察 `cleaned.jsonl` 中是否被替换为 `[EMAIL]` 和 `[PHONE]`。

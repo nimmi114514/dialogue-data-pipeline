@@ -23,11 +23,15 @@ def test_save_result_is_idempotent_for_records_and_dispositions(tmp_path: Path) 
         run_count = connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
         record_count = connection.execute("SELECT COUNT(*) FROM records").fetchone()[0]
         disposition_count = connection.execute("SELECT COUNT(*) FROM dispositions").fetchone()[0]
+        split_count = connection.execute(
+            "SELECT COUNT(DISTINCT split) FROM records WHERE split IS NOT NULL"
+        ).fetchone()[0]
 
     assert dataset_count == 1
     assert run_count == 2
     assert record_count == result.summary["kept_count"]
     assert disposition_count == result.summary["candidate_lines"]
+    assert split_count == 3
 
 
 def test_sql_topic_counts_match_pipeline_summary(tmp_path: Path) -> None:
@@ -81,3 +85,26 @@ def test_disposition_status_counts_match_summary(tmp_path: Path) -> None:
     assert rows["kept"] == result.summary["kept_count"]
     assert rows["duplicate"] == result.summary["duplicate_count"]
     assert rows["quarantined"] == result.summary["quarantined_count"]
+
+
+def test_records_store_split_and_leakage_group(tmp_path: Path) -> None:
+    config_path = Path("configs/default.json")
+    input_path = Path("data/samples/raw_dialogues.jsonl")
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    result = process_input(input_path, config_path, config)
+    db_path = tmp_path / "pipeline.sqlite"
+    save_result(db_path, result, config)
+
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT split, leakage_group_id
+            FROM records
+            WHERE dataset_version = ?
+            LIMIT 1
+            """,
+            (result.summary["dataset_version"],),
+        ).fetchone()
+
+    assert row[0] in {"train", "validation", "test"}
+    assert row[1].startswith("lg_")

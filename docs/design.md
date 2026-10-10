@@ -6,6 +6,7 @@
 - `validate.py`：验证单条记录的结构规则，不访问其他记录，不判断回答质量。
 - `clean.py`：对结构合格记录做规范化、模拟脱敏、内容哈希和长度检查。
 - `deduplicate.py`：处理跨记录的精确重复和 `sample_id` 冲突。
+- `split.py`：用 `group_id` 和 `content_hash` 构建泄漏组，并稳定划分 train / validation / test。
 - `pipeline.py`：编排读取、验证、清洗、去重，生成文件输出和数据库写入共用的处理结果。
 - `storage.py`：使用 SQLite 保存数据版本、运行记录、保留样本和每条输入最终处置。
 - `api.py`：FastAPI 薄后端，负责上传文件、调用 pipeline、写入 SQLite，并提供 dashboard 查询接口。
@@ -52,6 +53,25 @@
 
 当前实现使用 Python 标准库 `sqlite3` 和参数化 SQL。写入包在事务中完成，避免部分表成功、部分表失败后被误认为完整结果。
 
+## 泄漏组与划分
+
+划分发生在结构验证、清洗、脱敏和精确去重之后。划分对象是最终保留记录，但泄漏组连接关系会参考所有结构合格且清洗后的候选记录，包括后来被判定为重复的记录。
+
+泄漏组规则：
+
+- 每条候选记录连接一个 `group_id` 节点和一个 `content_hash` 节点。
+- 使用并查集求连通分量。
+- 同一连通分量生成稳定的 `leakage_group_id`。
+- 最终保留记录按 `leakage_group_id` 整组进入同一个 split。
+
+划分规则：
+
+- 默认 `split_seed=42`。
+- 默认目标比例 `train=0.8`、`validation=0.1`、`test=0.1`。
+- 按泄漏组划分，不拆组。
+- 当独立泄漏组少于 3 个时，不生成看似完整的三集合；summary 中记录 `split_error`。
+- 小样例中实际比例可能偏离目标比例，这是不拆组的正常结果。
+
 ## Web Dashboard
 
 可视化采用前后端分离的本地开发模式：
@@ -75,10 +95,10 @@ React 前端只负责展示和交互：
 - 上传 JSONL。
 - 展示 summary cards。
 - 展示 status/topic/rule 图表。
+- 展示 split 分布图。
 - 展示 cleaned 和 rejected 表格。
 - 点击行查看详情 JSON。
 
 ## 后续设计点
 
-- S4：泄漏组连通分量、稳定划分和导出。
 - S5：人工标签 CSV 校验、审核通过导出和质量报告。

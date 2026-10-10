@@ -89,7 +89,7 @@ python -m dialogue_pipeline run --input data/samples/raw_dialogues.jsonl --confi
 
 ### 待完成
 
-- S4 泄漏组与 train/validation/test 划分。
+- S4 泄漏组与 train/validation/test 划分已在后续记录完成。
 - 为分析 SQL 增加命令行执行或报告导出。
 
 ## 2026-10-10 Web Dashboard MVP
@@ -150,3 +150,37 @@ cd frontend && npm run build
 - CLI run：`kept=13 duplicate=1 quarantined=10 blank_lines=1`。
 - Frontend：`npm ci` 成功，`npm run build` 成功。
 - Vite 仍提示主 bundle 超过 500 kB，暂不阻塞 CI。
+
+## 2026-10-10 S4 泄漏组与划分
+
+### 已完成
+
+- 新增 `split.py`，用并查集基于 `group_id` 和 `content_hash` 构建泄漏组。
+- `cleaned.jsonl` 中新增 `leakage_group_id` 和 `split`。
+- `check` / `run` 新增导出 `train.jsonl`、`validation.jsonl`、`test.jsonl`。
+- SQLite `records` 表新增 `leakage_group_id` 和 `split`。
+- API `records` 返回 split 信息，新增 `/api/runs/{run_id}/stats/split`。
+- Dashboard 新增 split distribution 图表，cleaned records 表显示 split。
+- SQL 分析新增 split 分布和 split 内 topic 分布。
+- 测试扩展到 16 条，覆盖稳定划分、同组不跨集合、跨 group_id 相同内容关联、少于 3 组错误、SQLite/API split 输出。
+
+### 实际运行命令
+
+```bash
+python -m pytest
+python -m dialogue_pipeline run --input data/samples/raw_dialogues.jsonl --config configs/default.json --output artifacts/s4-run --db artifacts/s4.sqlite
+python -m dialogue_pipeline check --input data/samples/web_demo_dialogues.jsonl --output artifacts/s4-web-demo-check
+```
+
+### 当前结果
+
+- 测试：`16 passed`。
+- 样例 `raw_dialogues.jsonl`：`kept=13 duplicate=1 quarantined=10`。
+- 泄漏组数量：`11`。
+- split 数量：`train=11`、`validation=1`、`test=1`。
+- 小数据比例偏差较大，但没有拆分泄漏组。
+
+### 待完成
+
+- 质量报告 `quality_report.json` / `quality_report.md`。
+- 人工标注 CSV 导出和导入。

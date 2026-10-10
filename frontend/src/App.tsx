@@ -14,6 +14,7 @@ function App() {
   const [topicStats, setTopicStats] = useState<StatItem[]>([]);
   const [statusStats, setStatusStats] = useState<StatItem[]>([]);
   const [ruleStats, setRuleStats] = useState<StatItem[]>([]);
+  const [splitStats, setSplitStats] = useState<StatItem[]>([]);
   const [records, setRecords] = useState<CleanedRecord[]>([]);
   const [rejected, setRejected] = useState<RejectedRecord[]>([]);
   const [selected, setSelected] = useState<CleanedRecord | RejectedRecord | null>(null);
@@ -36,18 +37,20 @@ function App() {
     setActiveRunId(run.run_id);
     setSummary(run.summary);
     setSelected(null);
-    const [recordsResponse, rejectedResponse, topics, statuses, rules] = await Promise.all([
+    const [recordsResponse, rejectedResponse, topics, statuses, rules, splits] = await Promise.all([
       getRecords(run.run_id),
       getRejected(run.run_id),
       getStats(run.run_id, 'topic'),
       getStats(run.run_id, 'status'),
       getStats(run.run_id, 'rules'),
+      getStats(run.run_id, 'split'),
     ]);
     setRecords(recordsResponse.items);
     setRejected(rejectedResponse.items);
     setTopicStats(topics.items);
     setStatusStats(statuses.items);
     setRuleStats(rules.items);
+    setSplitStats(splits.items);
   }
 
   async function handleUpload(file: File) {
@@ -85,6 +88,7 @@ function App() {
         <SummaryCards summary={summary} />
         <section className="charts-grid">
           <ChartPanel title="Disposition Status" data={statusStats} variant="pie" />
+          <ChartPanel title="Split Distribution" data={splitStats} variant="pie" />
           <ChartPanel title="Topic Distribution" data={topicStats} />
           <ChartPanel title="Rule Counts" data={ruleStats} />
         </section>

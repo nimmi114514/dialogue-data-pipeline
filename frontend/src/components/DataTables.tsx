@@ -19,6 +19,7 @@ export function DataTables({ records, rejected, selected, onSelect }: Props) {
                 <th>Line</th>
                 <th>Sample</th>
                 <th>Topic</th>
+                <th>Split</th>
                 <th>Chars</th>
               </tr>
             </thead>
@@ -28,6 +29,7 @@ export function DataTables({ records, rejected, selected, onSelect }: Props) {
                   <td>{record.line_number}</td>
                   <td>{record.sample_id}</td>
                   <td>{record.topic}</td>
+                  <td>{record.split ?? '-'}</td>
                   <td>{record.char_count}</td>
                 </tr>
               ))}

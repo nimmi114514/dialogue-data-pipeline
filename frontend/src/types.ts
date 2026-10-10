@@ -45,6 +45,8 @@ export type CleanedRecord = {
   language: string;
   content_hash: string;
   char_count: number;
+  leakage_group_id: string | null;
+  split: string | null;
   line_number: number;
   messages: Message[];
   cleaning_events: Array<Record<string, unknown>>;

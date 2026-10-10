@@ -7,6 +7,12 @@
     "duplicate_count": 1,
     "quarantined_count": 10,
     "rejected_count": 11,
+    "split_counts": {
+      "train": 11,
+      "validation": 1,
+      "test": 1
+    },
+    "leakage_group_count": 11,
     "notes": [
       "duplicate_id_demo 的两条记录结构合格，但在 S2 因同 sample_id 对应不同内容而全部隔离。",
       "schedule_001_copy 首尾空白清理后与 schedule_001 内容相同，因此应作为 DUPLICATE_CONTENT。",

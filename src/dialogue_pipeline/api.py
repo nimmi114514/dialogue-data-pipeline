@@ -11,7 +11,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from .pipeline import process_input
-from .storage import save_result
+from .storage import create_schema, save_result
 
 
 APP_ROOT = Path("artifacts/web")
@@ -129,6 +129,8 @@ def get_records(
               language,
               content_hash,
               char_count,
+              leakage_group_id,
+              split,
               line_number,
               messages_json,
               cleaning_events_json
@@ -150,6 +152,8 @@ def get_records(
                 "language": row["language"],
                 "content_hash": row["content_hash"],
                 "char_count": row["char_count"],
+                "leakage_group_id": row["leakage_group_id"],
+                "split": row["split"],
                 "line_number": row["line_number"],
                 "messages": json.loads(row["messages_json"]),
                 "cleaning_events": json.loads(row["cleaning_events_json"]),
@@ -267,6 +271,23 @@ def rule_stats(run_id: str) -> dict[str, Any]:
     return {"items": [_name_value(row) for row in rows]}
 
 
+@app.get("/api/runs/{run_id}/stats/split")
+def split_stats(run_id: str) -> dict[str, Any]:
+    dataset_version = _dataset_version_for_run(run_id)
+    with _connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT COALESCE(split, 'unassigned') AS name, COUNT(*) AS value
+            FROM records
+            WHERE dataset_version = ?
+            GROUP BY name
+            ORDER BY value DESC, name ASC
+            """,
+            (dataset_version,),
+        ).fetchall()
+    return {"items": [_name_value(row) for row in rows]}
+
+
 def _load_config(config_path: Path) -> dict[str, Any]:
     with config_path.open("r", encoding="utf-8") as file_obj:
         config = json.load(file_obj)
@@ -280,6 +301,8 @@ def _write_outputs(output_dir: Path, result: Any) -> None:
     _write_jsonl(output_dir / "cleaned.jsonl", result.cleaned_rows)
     _write_jsonl(output_dir / "accepted.jsonl", result.cleaned_rows)
     _write_jsonl(output_dir / "rejected.jsonl", result.rejected_rows)
+    for split_name, rows in result.split_rows.items():
+        _write_jsonl(output_dir / f"{split_name}.jsonl", rows)
     _write_json(output_dir / "summary.json", result.summary)
 
 
@@ -301,6 +324,7 @@ def _connect() -> sqlite3.Connection:
         raise HTTPException(status_code=404, detail="No dashboard database exists yet.")
     connection = sqlite3.connect(DB_PATH)
     connection.row_factory = sqlite3.Row
+    create_schema(connection)
     return connection
 
 

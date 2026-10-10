@@ -42,3 +42,9 @@ JSONL 的好处是每行独立。第 14 行坏了，不应该导致第 15 行之
 1. 运行两次 `python -m dialogue_pipeline run --input data/samples/raw_dialogues.jsonl --config configs/default.json --output artifacts/run-practice --db artifacts/practice.sqlite`，然后查询 `records` 数量，确认不会翻倍。
 2. 修改 `sql/analysis.sql` 中 topic 统计的 `ORDER BY`，按 topic 名称升序输出。
 3. 自己写一条 SQL：从 `dispositions` 表统计 `status='quarantined'` 的行数。
+
+## S4 练习
+
+1. 打开 `artifacts/s4-run/train.jsonl`、`validation.jsonl`、`test.jsonl`，确认同一个 `leakage_group_id` 没有出现在多个文件中。
+2. 修改 `configs/default.json` 的 `split_seed`，重新运行 `run`，观察 split 分配是否变化。
+3. 新增两条不同 `group_id` 但相同消息内容的样本，运行 check，观察它们是否得到相同的 `leakage_group_id`。

@@ -9,6 +9,7 @@ from typing import Any
 from .clean import clean_record, length_issues
 from .deduplicate import CandidateRecord, Disposition, resolve_duplicates
 from .ingest import RejectedLine, read_jsonl
+from .split import SplitError, assign_splits
 from .validate import validate_record
 
 
@@ -17,6 +18,7 @@ class PipelineResult:
     cleaned_rows: list[dict[str, Any]]
     rejected_rows: list[dict[str, Any]]
     disposition_rows: list[dict[str, Any]]
+    split_rows: dict[str, list[dict[str, Any]]]
     summary: dict[str, Any]
 
 
@@ -105,7 +107,28 @@ def process_input(input_path: Path, config_path: Path, config: dict[str, Any]) -
             rule_id = reason["rule_id"]
             rule_counts[rule_id] = rule_counts.get(rule_id, 0) + 1
 
-    cleaned_rows = [_kept_record_to_row(item.candidate) for item in kept]
+    split_error: str | None = None
+    try:
+        split_result = assign_splits(kept, candidates, config)
+        assignments = split_result.assignments
+        split_counts = split_result.split_counts
+        leakage_group_count = split_result.leakage_group_count
+        leakage_group_sizes = split_result.leakage_group_sizes
+    except SplitError as exc:
+        split_error = str(exc)
+        assignments = {}
+        split_counts = {"train": 0, "validation": 0, "test": 0}
+        leakage_group_count = 0
+        leakage_group_sizes = {}
+
+    cleaned_rows = [
+        _kept_record_to_row(item.candidate, assignments.get(item.candidate.record["sample_id"]))
+        for item in kept
+    ]
+    split_rows = {
+        split_name: [row for row in cleaned_rows if row["split"] == split_name]
+        for split_name in ("train", "validation", "test")
+    }
     rejected_rows = [_disposition_to_row(item) for item in non_kept_dispositions]
     kept_disposition_rows = [_kept_disposition_to_row(row) for row in cleaned_rows]
     disposition_rows = sorted(
@@ -131,12 +154,17 @@ def process_input(input_path: Path, config_path: Path, config: dict[str, Any]) -
         "rejected_count": len(non_kept_dispositions),
         "rule_counts": dict(sorted(rule_counts.items())),
         "cleaning_event_counts": dict(sorted(cleaning_event_counts.items())),
+        "split_counts": split_counts,
+        "leakage_group_count": leakage_group_count,
+        "leakage_group_sizes": dict(sorted(leakage_group_sizes.items())),
+        "split_error": split_error,
         "status": "completed_with_data_issues" if non_kept_dispositions else "completed",
     }
     return PipelineResult(
         cleaned_rows=cleaned_rows,
         rejected_rows=rejected_rows,
         disposition_rows=disposition_rows,
+        split_rows=split_rows,
         summary=summary,
     )
 
@@ -168,7 +196,9 @@ def _disposition_from_rejected_line(rejected_line: RejectedLine, status: str) ->
     )
 
 
-def _kept_record_to_row(candidate: CandidateRecord) -> dict[str, Any]:
+def _kept_record_to_row(candidate: CandidateRecord, assignment: Any | None) -> dict[str, Any]:
+    split = assignment.split if assignment is not None else None
+    leakage_group_id = assignment.leakage_group_id if assignment is not None else None
     return {
         "source_path": candidate.source_path,
         "source_file_hash": candidate.source_file_hash,
@@ -180,6 +210,8 @@ def _kept_record_to_row(candidate: CandidateRecord) -> dict[str, Any]:
         "language": candidate.record["language"],
         "content_hash": candidate.content_hash,
         "char_count": candidate.char_count,
+        "leakage_group_id": leakage_group_id,
+        "split": split,
         "cleaning_events": candidate.cleaning_events,
         "record": candidate.record,
     }

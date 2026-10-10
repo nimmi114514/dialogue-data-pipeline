@@ -82,6 +82,8 @@ def _write_outputs(output_dir: Path, result: PipelineResult) -> None:
     _write_jsonl(output_dir / "cleaned.jsonl", result.cleaned_rows)
     _write_jsonl(output_dir / "accepted.jsonl", result.cleaned_rows)
     _write_jsonl(output_dir / "rejected.jsonl", result.rejected_rows)
+    for split_name, rows in result.split_rows.items():
+        _write_jsonl(output_dir / f"{split_name}.jsonl", rows)
     _write_json(output_dir / "summary.json", result.summary)
 
 

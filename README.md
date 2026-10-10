@@ -24,6 +24,7 @@
 - 合格记录经过文本规范化、模拟邮箱/手机号脱敏和内容哈希计算。
 - 精确重复内容只保留第一条，其余记录为 `duplicate`。
 - 同一个 `sample_id` 对应不同内容时，相关记录全部隔离为 `SAMPLE_ID_CONFLICT`。
+- 按泄漏组稳定划分 `train` / `validation` / `test`，同一组不会跨集合。
 - 输出结果写入 JSONL 文件，也可以持久化到 SQLite 供 SQL 分析使用。
 - 提供本地 Web Dashboard，支持上传 JSONL、运行流水线并查看统计图和明细表。
 
@@ -91,6 +92,13 @@ raw_dialogues.jsonl
         |-- 同 ID 不同内容 -> rejected.jsonl, status=quarantined
         |
         v
+泄漏组与 split 划分
+        |
+        |-- group_id + content_hash 连通分量
+        |-- 固定 seed
+        |-- 按组分配 train / validation / test
+        |
+        v
 cleaned.jsonl + summary.json
         |
         v
@@ -112,6 +120,7 @@ dialogue-data-pipeline/
     validate.py
     clean.py
     deduplicate.py
+    split.py
     storage.py
   frontend/
     src/
@@ -231,6 +240,9 @@ artifacts/check/
   cleaned.jsonl
   accepted.jsonl
   rejected.jsonl
+  train.jsonl
+  validation.jsonl
+  test.jsonl
   summary.json
 ```
 
@@ -239,6 +251,9 @@ artifacts/check/
 | `cleaned.jsonl` | 最终保留的清洗后记录 |
 | `accepted.jsonl` | 与 `cleaned.jsonl` 相同，保留兼容命名 |
 | `rejected.jsonl` | JSON 错误、结构错误、重复内容和冲突记录 |
+| `train.jsonl` | 训练集合，按泄漏组划分 |
+| `validation.jsonl` | 验证集合，按泄漏组划分 |
+| `test.jsonl` | 测试集合，按泄漏组划分 |
 | `summary.json` | 输入行数、保留数、隔离数、重复数、规则计数和清洗事件计数 |
 
 `cleaned.jsonl` 中每条记录包含：
@@ -252,6 +267,8 @@ artifacts/check/
 - `content_hash`
 - `char_count`
 - `cleaning_events`
+- `leakage_group_id`
+- `split`
 - 清洗后的 `record`
 
 `rejected.jsonl` 中每条记录包含：
@@ -282,6 +299,8 @@ artifacts/pipeline.sqlite
 | `dispositions` | 每条非空输入行的最终处置，包含 `kept`、`duplicate`、`quarantined` |
 
 `dataset_version` 由输入文件哈希、配置哈希和源码哈希计算得到，用于区分不同处理版本。
+
+`records` 中的 `split` 和 `leakage_group_id` 用于检查 train / validation / test 划分。相同 `leakage_group_id` 不应跨集合。
 
 SQL 示例位于：
 
@@ -316,6 +335,8 @@ configs/default.json
 | `max_dialogue_chars` | 整段对话最大字符数 |
 | `email_pattern` | 模拟邮箱识别正则 |
 | `phone_pattern` | 模拟手机号识别正则 |
+| `split_seed` | 稳定划分随机种子 |
+| `split_ratios` | train / validation / test 目标比例 |
 
 ## 测试
 
@@ -337,6 +358,7 @@ python -m pytest
 - 重复运行不重复插入记录。
 - SQL topic 统计与 Python summary 对照。
 - FastAPI 上传和查询接口。
+- 泄漏组划分和 split 稳定性。
 
 前端构建：
 

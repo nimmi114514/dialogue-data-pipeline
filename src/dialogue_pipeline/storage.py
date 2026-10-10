@@ -81,6 +81,8 @@ def create_schema(connection: sqlite3.Connection) -> None:
             record_json TEXT NOT NULL,
             cleaning_events_json TEXT NOT NULL,
             char_count INTEGER NOT NULL,
+            leakage_group_id TEXT,
+            split TEXT,
             PRIMARY KEY (dataset_version, sample_id),
             FOREIGN KEY (dataset_version) REFERENCES datasets(dataset_version)
         );
@@ -106,6 +108,8 @@ def create_schema(connection: sqlite3.Connection) -> None:
             ON dispositions(dataset_version, status);
         """
     )
+    _ensure_column(connection, "records", "leakage_group_id", "TEXT")
+    _ensure_column(connection, "records", "split", "TEXT")
 
 
 def _upsert_dataset(
@@ -165,8 +169,10 @@ def _replace_records(connection: sqlite3.Connection, result: PipelineResult) -> 
             messages_json,
             record_json,
             cleaning_events_json,
-            char_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            char_count,
+            leakage_group_id,
+            split
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -183,6 +189,8 @@ def _replace_records(connection: sqlite3.Connection, result: PipelineResult) -> 
                 _to_json(row["record"]),
                 _to_json(row["cleaning_events"]),
                 row["char_count"],
+                row["leakage_group_id"],
+                row["split"],
             )
             for row in result.cleaned_rows
         ],
@@ -229,3 +237,17 @@ def _to_json(value: Any) -> str:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    column_type: str,
+) -> None:
+    columns = {
+        row[1]
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in columns:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")

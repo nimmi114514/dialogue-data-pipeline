@@ -7,7 +7,8 @@ SELECT
   json_extract(summary_json, '$.candidate_lines') AS candidate_lines,
   json_extract(summary_json, '$.kept_count') AS kept_count,
   json_extract(summary_json, '$.duplicate_count') AS duplicate_count,
-  json_extract(summary_json, '$.quarantined_count') AS quarantined_count
+  json_extract(summary_json, '$.quarantined_count') AS quarantined_count,
+  json_extract(summary_json, '$.leakage_group_count') AS leakage_group_count
 FROM datasets
 WHERE dataset_version = :dataset_version;
 
@@ -28,6 +29,26 @@ FROM records
 WHERE dataset_version = :dataset_version
 GROUP BY source
 ORDER BY sample_count DESC, source ASC;
+
+-- Train / validation / test distribution for kept records.
+SELECT
+  COALESCE(split, 'unassigned') AS split,
+  COUNT(*) AS sample_count,
+  COUNT(DISTINCT leakage_group_id) AS leakage_group_count
+FROM records
+WHERE dataset_version = :dataset_version
+GROUP BY split
+ORDER BY sample_count DESC, split ASC;
+
+-- Topic distribution within each split.
+SELECT
+  COALESCE(split, 'unassigned') AS split,
+  topic,
+  COUNT(*) AS sample_count
+FROM records
+WHERE dataset_version = :dataset_version
+GROUP BY split, topic
+ORDER BY split ASC, sample_count DESC, topic ASC;
 
 -- Final disposition status counts for every non-empty input line.
 SELECT

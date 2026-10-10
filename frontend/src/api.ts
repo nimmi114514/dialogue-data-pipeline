@@ -30,6 +30,9 @@ export async function getRejected(runId: string): Promise<{ total: number; items
   return request<{ total: number; items: RejectedRecord[] }>(`/api/runs/${runId}/rejected?limit=200`);
 }
 
-export async function getStats(runId: string, kind: 'topic' | 'status' | 'rules'): Promise<{ items: StatItem[] }> {
+export async function getStats(
+  runId: string,
+  kind: 'topic' | 'status' | 'rules' | 'split',
+): Promise<{ items: StatItem[] }> {
   return request<{ items: StatItem[] }>(`/api/runs/${runId}/stats/${kind}`);
 }

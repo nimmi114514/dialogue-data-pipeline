@@ -9,8 +9,11 @@ import uuid
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
+from .export import write_outputs
 from .pipeline import process_input
+from .report import load_report, render_markdown
 from .storage import create_schema, save_result
 
 
@@ -51,8 +54,8 @@ def create_run(file: UploadFile = File(...)) -> dict[str, Any]:
 
     config = _load_config(DEFAULT_CONFIG)
     result = process_input(input_path, DEFAULT_CONFIG, config)
-    _write_outputs(output_dir, result)
     db_run_id = save_result(DB_PATH, result, config)
+    write_outputs(output_dir, result, config, report=load_report(DB_PATH, result.summary["dataset_version"]))
 
     return {
         "run_id": db_run_id,
@@ -296,27 +299,16 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     return config
 
 
-def _write_outputs(output_dir: Path, result: Any) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    _write_jsonl(output_dir / "cleaned.jsonl", result.cleaned_rows)
-    _write_jsonl(output_dir / "accepted.jsonl", result.cleaned_rows)
-    _write_jsonl(output_dir / "rejected.jsonl", result.rejected_rows)
-    for split_name, rows in result.split_rows.items():
-        _write_jsonl(output_dir / f"{split_name}.jsonl", rows)
-    _write_json(output_dir / "summary.json", result.summary)
-
-
-def _write_json(path: Path, data: dict[str, Any]) -> None:
-    with path.open("w", encoding="utf-8") as file_obj:
-        json.dump(data, file_obj, ensure_ascii=False, indent=2, sort_keys=True)
-        file_obj.write("\n")
-
-
-def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
-    with path.open("w", encoding="utf-8") as file_obj:
-        for row in rows:
-            file_obj.write(json.dumps(row, ensure_ascii=False, sort_keys=True))
-            file_obj.write("\n")
+@app.get("/api/runs/{run_id}/report")
+def get_report(run_id: str, format: str = Query(default="json", pattern="^(json|md)$")) -> Response:
+    dataset_version = _dataset_version_for_run(run_id)
+    report = load_report(DB_PATH, dataset_version)
+    content = render_markdown(report) if format == "md" else json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    return Response(
+        content=content,
+        media_type="text/markdown" if format == "md" else "application/json",
+        headers={"Content-Disposition": f'attachment; filename="quality_report.{format}"'},
+    )
 
 
 def _connect() -> sqlite3.Connection:

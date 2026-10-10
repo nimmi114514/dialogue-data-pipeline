@@ -27,6 +27,8 @@
 - 按泄漏组稳定划分 `train` / `validation` / `test`，同一组不会跨集合。
 - 输出结果写入 JSONL 文件，也可以持久化到 SQLite 供 SQL 分析使用。
 - 提供本地 Web Dashboard，支持上传 JSONL、运行流水线并查看统计图和明细表。
+- 自动生成 JSON 与 Markdown 质量报告，保留指标分母、统计口径与一致性检查。
+- 使用 CSV 导入人工审核标签，只导出有效人工接受的样本和训练消息。
 
 ## 数据格式
 
@@ -122,6 +124,9 @@ dialogue-data-pipeline/
     deduplicate.py
     split.py
     storage.py
+    report.py
+    export.py
+    review.py
   frontend/
     src/
   sql/analysis.sql
@@ -202,6 +207,8 @@ export NO_PROXY=127.0.0.1,localhost
 artifacts/web/
 ```
 
+选择运行记录后，可在数据版本旁下载 JSON 或 Markdown 质量报告。报告从该版本的数据库记录生成，历史运行也可使用。
+
 ## 运行并写入 SQLite
 
 `run` 命令会执行同样的数据处理流程，并把结果写入本地 SQLite 数据库：
@@ -221,6 +228,45 @@ run completed: dataset_version=... kept=13 duplicate=1 quarantined=10 blank_line
 ```
 
 同一份输入、同一份配置和同一份源码重复运行时，`records` 和 `dispositions` 会按同一个 `dataset_version` 替换写入，不会重复膨胀；`runs` 会保留每次运行记录。
+
+从已有数据库重新生成报告，无需原始 JSONL；`--version` 使用运行输出中的完整版本号：
+
+```bash
+python -m dialogue_pipeline report \
+  --db artifacts/pipeline.sqlite \
+  --version YOUR_DATASET_VERSION \
+  --output artifacts/report
+```
+
+`report` 以只读方式打开数据库，不新增运行记录。数据库或版本不存在时返回退出码 `1`。
+
+## 人工审核与导出
+
+先运行 `run` 写入 SQLite，再使用输出的完整 `dataset_version` 导出审核模板和消息上下文：
+
+```bash
+python -m dialogue_pipeline labels-template \
+  --db artifacts/pipeline.sqlite --version YOUR_DATASET_VERSION \
+  --output artifacts/review-work
+```
+
+打开 `labels_template.csv`，按 `sample_id` 查阅 `review_samples.jsonl` 中的消息；填写 relevant、complete、decision、reviewer、label_origin 和 notes。未审行留空。具体约定见 [审核指南](docs/annotation-guide.md)。
+
+```bash
+python -m dialogue_pipeline labels-import \
+  --db artifacts/pipeline.sqlite --version YOUR_DATASET_VERSION \
+  --input artifacts/review-work/labels_template.csv
+
+python -m dialogue_pipeline export-reviewed \
+  --db artifacts/pipeline.sqlite --version YOUR_DATASET_VERSION \
+  --output artifacts/reviewed-v1
+```
+
+导入校验版本、内容哈希、枚举、审核人、重复行和决策约束；整批通过才写入。相同样本的新标签覆盖旧标签，空白行不删除旧判断。重新生成报告或从网页下载报告后可查看更新的审核指标；之前导出的报告文件保持原来的快照。
+
+审核导出包含 `reviewed_train.jsonl`、`reviewed_validation.jsonl`、`reviewed_test.jsonl`、`sft_train.jsonl`、`sft_train.sidecar.jsonl`、标签快照、质量报告和 `review_manifest.json`。只有 `human+accept` 样本进入审核通过文件；SFT 只取训练集合。没有人工接受样本时，载荷为空，清单明确说明原因。`synthetic_demo` 标签仅供演示，不计入人工审核。
+
+每次导出使用一个新的输出目录，成功后整体发布。数据版本标识自动处理结果；`review_version` 由数据版本、有效标签快照和导出源码哈希决定。清单记录文件 SHA-256；同一快照重导出载荷一致，标签修改不会重新随机划分数据。
 
 严格模式会在存在数据规则问题时返回退出码 `2`：
 
@@ -244,6 +290,8 @@ artifacts/check/
   validation.jsonl
   test.jsonl
   summary.json
+  quality_report.json
+  quality_report.md
 ```
 
 | 文件 | 说明 |
@@ -255,6 +303,10 @@ artifacts/check/
 | `validation.jsonl` | 验证集合，按泄漏组划分 |
 | `test.jsonl` | 测试集合，按泄漏组划分 |
 | `summary.json` | 输入行数、保留数、隔离数、重复数、规则计数和清洗事件计数 |
+| `quality_report.json` | 处置、规则、清洗、主题、来源、字符长度、集合分布和一致性检查 |
+| `quality_report.md` | 同一报告的人可读版本，包含有分子和分母的数据观察 |
+
+报告中的保留比例表示通过自动处理规则的比例，不能代表回答正确率。规则次数可重叠；冲突行数属于隔离行数的子集；清洗修改次数包含后续被去重或隔离的候选记录。人工审核覆盖率和接受率仅统计有效 human 标签；无人工标签时接受率为 `null`（Markdown 为 `N/A`），所有零分母指标都使用该约定。
 
 `cleaned.jsonl` 中每条记录包含：
 
@@ -297,6 +349,7 @@ artifacts/pipeline.sqlite
 | `runs` | 每次运行的 `run_id`、时间和状态 |
 | `records` | 最终保留的清洗后样本 |
 | `dispositions` | 每条非空输入行的最终处置，包含 `kept`、`duplicate`、`quarantined` |
+| `labels` | 绑定数据版本、样本与内容哈希的最新审核判断 |
 
 `dataset_version` 由输入文件哈希、配置哈希和源码哈希计算得到，用于区分不同处理版本。
 
@@ -359,6 +412,7 @@ python -m pytest
 - SQL topic 统计与 Python summary 对照。
 - FastAPI 上传和查询接口。
 - 泄漏组划分和 split 稳定性。
+- 报告零分母、规则重叠、切分失败和 SQLite 只读复现。
 
 前端构建：
 
@@ -379,8 +433,10 @@ CI 在 push 到 `main` 和 pull request 时运行两个 job：
 
 | Job | 内容 |
 | --- | --- |
-| `Python tests` | 安装 `.[api,dev]`，运行 `pytest`，运行样例 `check` 和 `run` 命令 |
+| `Python tests` | 运行 `pytest` 和样例 CLI，核对文件与数据库报告一致，上传报告产物 |
 | `Frontend build` | 使用 Node 24，执行 `npm ci` 和 `npm run build` |
+
+Python job 成功后，可在该次 Actions 运行的 Artifacts 中下载 `sample-quality-reports`，包含样例的 JSON 和 Markdown 报告。
 
 本地复刻 CI：
 

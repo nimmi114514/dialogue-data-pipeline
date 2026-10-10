@@ -184,3 +184,72 @@ python -m dialogue_pipeline check --input data/samples/web_demo_dialogues.jsonl 
 
 - 质量报告 `quality_report.json` / `quality_report.md`。
 - 人工标注 CSV 导出和导入。
+
+## 2026-10-10 质量报告
+
+### 实现
+
+- 新增 `report.py`，生成 JSON 和 Markdown 质量报告，统计处置、冲突、规则、清洗事件、主题、来源、字符长度、集合和泄漏组。
+- 比例保留分子、分母；零分母写 null / N/A；未导入人工标签明确标识，决策计数为零。
+- 报告提供四条含数字、含义与局限的观察，以及计数和跨集合重叠检查。
+- 合并 CLI/API 文件导出到 `export.py`，check、run、Web 上传自动生成报告。
+- 新增只读 `report --db --version --output` 命令、API 报告下载接口、网页 JSON/Markdown 下载入口。
+- CI 增加报告逐字节一致性检查和 `sample-quality-reports` artifact 上传步骤；尚未在远程执行本次 workflow。
+- README 和本地私有 spec 更新技术说明及运行方式；spec 仍被 gitignore 排除。
+
+### 实际验证
+
+```bash
+python -m pytest --ignore=tests/test_api.py -q
+python -m dialogue_pipeline run --input data/samples/raw_dialogues.jsonl --output artifacts/report-demo --db artifacts/report-demo.sqlite
+python -m dialogue_pipeline report --db artifacts/report-demo.sqlite --version YOUR_DATASET_VERSION --output artifacts/report-from-db
+cd frontend && npm run build
+```
+
+- 非 HTTP 测试 `21 passed`；覆盖空文件、全部隔离、规则重叠、切分失败、非法版本、只读数据库、文件/数据库报告一致、目标比例默认值。
+- 样例保留 13 条、重复 1 条、隔离 10 条；报告与 SQL 的主题、规则统计一致。
+- 文件报告与 SQLite 重建报告逐字节一致；原始 JSONL 删除后仍可重建报告。
+- 直接调用 API 函数验证上传、JSON/Markdown 响应、下载文件名、记录查询和未知运行 404，通过。
+- 前端构建通过；仍有现有的主包超过 500 kB 提示。
+
+### 环境限制与后续
+
+- 本次环境禁止网络 socket：全量 pytest 在 TestClient 上阻塞，已终止；2 条 HTTP 集成测试未完成。直接函数验证不能替代 HTTP 集成测试。
+- uvicorn 和 Vite 启动均被环境拒绝，未完成浏览器截图或点击验证。
+- `.git` 为只读，`git add` 无法创建 index.lock，本次未提交或推送。
+- 下一步：人工审核 CSV 模板与原子导入、manifest、审核通过子集及 SFT sidecar；同时完善独立组不足时的 CLI 退出策略。
+
+## 2026-10-10 审核闭环与项目范围
+
+### 实现与取舍
+
+- 按求职练手目标优先完成可演示、可解释、有测试依据的数据闭环；保留 SQLite、CLI、FastAPI、React 和 GitHub Actions 的现有架构。
+- 增加 labels 表和 `labels-template` / `labels-import` / `export-reviewed` 三个命令，模板附完整对话上下文。
+- 整批验证和 upsert 使用同一事务；校验失败及中途写入失败均回滚。重复导入不增加标签数，相同版本重跑保留已有判断。
+- 报告区分有效人工标签、演示标签和失效标签；网页报告下载随数据库中的最新标签更新。
+- 审核导出保持原集合，只包含有效 human+accept；SFT 仅来自 train，sidecar 保存输入行血缘。
+- review_version 绑定数据版本、标签快照和导出源码；导出使用临时目录成功后整体发布，review_manifest 记录文件哈希。
+- CI 增加空白模板导入和空训练载荷检查。README 仅保留技术说明，项目范围和面试解释补进本地私有 spec。
+
+### 实际验证
+
+- `python -m pytest --ignore=tests/test_api.py -q`：`42 passed`。
+- 测试包括非法/重复/过期标签、CSV 结构错误、批量验证不写入、数据库中途失败回滚、幂等导入、重跑标签保留、演示数据排除、训练/验证/测试隔离、快照变更、哈希核对、导出失败不发布。
+- 本地 `artifacts/review-practice/` 已运行 run、labels-template、空模板 labels-import 和 export-reviewed；13 条待审核样本、零条人工标签，空训练文件符合预期。
+- 直接 API 函数验证上传后 JSON/Markdown 报告与文件输出一致，通过。未运行浏览器或 HTTP 集成测试。
+- 本次未改前端代码，不重复构建。受现有环境的 socket 和 `.git` 只读限制，2 条 HTTP 测试及提交推送仍未完成；未在远程执行 CI。
+
+### 后续收尾
+
+- 开发者亲自审核 3–5 条，手算指标并核对导出；没有替开发者生成 human 标签。
+- 完善 split 失败退出策略、自动处理输出的原子发布和完整运行 manifest。
+- 优先补一键本地启动与端到端演示，再按具体岗位需要决定额外增强。
+
+## 2026-10-10 本地启动与完整测试复核
+
+- 执行环境权限调整后，端口监听限制解除。uvicorn 在 `127.0.0.1:8000`、Vite 在 `127.0.0.1:5173` 成功启动。
+- 后端 `/api/health`、前端首页及经 Vite 代理的 `/api/health` 均返回 HTTP 200。
+- 经前端代理上传 `web_demo_dialogues.jsonl`，实际结果为保留 6 条、重复 1 条、隔离 8 条；Markdown 报告下载返回 HTTP 200。
+- `python -m pytest -q`：`44 passed`，此前未完成的 2 条 HTTP 集成测试也已通过。仍有一条 Starlette TestClient 依赖弃用提示。
+- 本次没有浏览器截图或交互点击验证；HTTP 连通检查不能替代完整浏览器验收。
+- Git 工作区恢复可写，准备将质量报告、审核闭环、CI 和对应文档一并提交。私有 spec 和运行产物继续排除。

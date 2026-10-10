@@ -36,6 +36,36 @@ jobs:
             --output artifacts/ci-run \
             --db artifacts/ci.sqlite
 
+      - name: Regenerate report from SQLite
+        run: |
+          DATASET_VERSION=$(python -c 'import json; print(json.load(open("artifacts/ci-run/summary.json"))["dataset_version"])')
+          python -m dialogue_pipeline report \
+            --db artifacts/ci.sqlite \
+            --version "$DATASET_VERSION" \
+            --output artifacts/ci-report
+          diff artifacts/ci-run/quality_report.json artifacts/ci-report/quality_report.json
+          diff artifacts/ci-run/quality_report.md artifacts/ci-report/quality_report.md
+
+      - name: Verify review CLI with unfilled labels
+        run: |
+          DATASET_VERSION=$(python -c 'import json; print(json.load(open("artifacts/ci-run/summary.json"))["dataset_version"])')
+          python -m dialogue_pipeline labels-template \
+            --db artifacts/ci.sqlite --version "$DATASET_VERSION" --output artifacts/ci-labels
+          python -m dialogue_pipeline labels-import \
+            --db artifacts/ci.sqlite --version "$DATASET_VERSION" --input artifacts/ci-labels/labels_template.csv
+          python -m dialogue_pipeline export-reviewed \
+            --db artifacts/ci.sqlite --version "$DATASET_VERSION" --output artifacts/ci-reviewed
+          python -c 'from pathlib import Path; assert Path("artifacts/ci-reviewed/sft_train.jsonl").read_bytes() == b""'
+
+      - name: Upload sample quality reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: sample-quality-reports
+          path: |
+            artifacts/ci-report/quality_report.*
+            artifacts/ci-reviewed/review_manifest.json
+          if-no-files-found: error
+
   frontend:
     name: Frontend build
     runs-on: ubuntu-latest

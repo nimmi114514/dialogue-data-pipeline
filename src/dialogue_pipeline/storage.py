@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -8,6 +9,24 @@ import uuid
 from typing import Any
 
 from .pipeline import PipelineResult
+
+
+LABELS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS labels (
+    dataset_version TEXT NOT NULL,
+    sample_id TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    relevant TEXT NOT NULL CHECK (relevant IN ('yes', 'no', 'unsure')),
+    complete TEXT NOT NULL CHECK (complete IN ('yes', 'no', 'unsure')),
+    decision TEXT NOT NULL CHECK (decision IN ('accept', 'reject', 'unsure')),
+    reviewer TEXT NOT NULL,
+    label_origin TEXT NOT NULL CHECK (label_origin IN ('human', 'synthetic_demo')),
+    notes TEXT NOT NULL,
+    PRIMARY KEY (dataset_version, sample_id),
+    FOREIGN KEY (dataset_version, sample_id) REFERENCES records(dataset_version, sample_id)
+        DEFERRABLE INITIALLY DEFERRED
+)
+"""
 
 
 def save_result(db_path: Path, result: PipelineResult, config: dict[str, Any]) -> str:
@@ -110,6 +129,45 @@ def create_schema(connection: sqlite3.Connection) -> None:
     )
     _ensure_column(connection, "records", "leakage_group_id", "TEXT")
     _ensure_column(connection, "records", "split", "TEXT")
+    connection.execute(LABELS_SCHEMA)
+
+
+def load_dataset(db_path: Path, dataset_version: str) -> dict[str, Any]:
+    """Read all report/review inputs in a single read-only SQLite snapshot."""
+    uri = db_path.resolve().as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True)) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("BEGIN")
+        dataset = connection.execute(
+            "SELECT summary_json, config_json FROM datasets WHERE dataset_version = ?",
+            (dataset_version,),
+        ).fetchone()
+        if dataset is None:
+            raise ValueError(f"Dataset version not found: {dataset_version}")
+        records = [dict(row) for row in connection.execute(
+            "SELECT * FROM records WHERE dataset_version = ? ORDER BY line_number, sample_id",
+            (dataset_version,),
+        )]
+        dispositions = [
+            {**dict(row), "reasons": json.loads(row["reasons_json"])}
+            for row in connection.execute(
+                "SELECT * FROM dispositions WHERE dataset_version = ? ORDER BY line_number",
+                (dataset_version,),
+            )
+        ]
+        has_labels = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'labels'"
+        ).fetchone()
+        labels = [dict(row) for row in connection.execute(
+            "SELECT * FROM labels WHERE dataset_version = ? ORDER BY sample_id", (dataset_version,),
+        )] if has_labels else []
+        return {
+            "summary": json.loads(dataset["summary_json"]),
+            "config": json.loads(dataset["config_json"]),
+            "records": records,
+            "dispositions": dispositions,
+            "labels": labels,
+        }
 
 
 def _upsert_dataset(

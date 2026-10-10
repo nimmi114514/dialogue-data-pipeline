@@ -48,3 +48,33 @@ JSONL 的好处是每行独立。第 14 行坏了，不应该导致第 15 行之
 1. 打开 `artifacts/s4-run/train.jsonl`、`validation.jsonl`、`test.jsonl`，确认同一个 `leakage_group_id` 没有出现在多个文件中。
 2. 修改 `configs/default.json` 的 `split_seed`，重新运行 `run`，观察 split 分配是否变化。
 3. 新增两条不同 `group_id` 但相同消息内容的样本，运行 check，观察它们是否得到相同的 `leakage_group_id`。
+
+## 质量报告：实现说明
+
+报告分成三步：`build_report(summary, records, dispositions, config)` 统计最终记录，`render_markdown(report)` 将同一份数据转成人可读文本，`load_report(db_path, dataset_version)` 从 SQLite 的一致性快照重新统计。文件处理和网页使用同一个生成器，避免两套统计口径。
+
+样例中保留率为 13/24，即 54.17%；分母包含坏 JSON，排除空白行。隔离 10 条、重复 1 条，与保留 13 条互斥，加起来是 24。规则可能在同一条记录上出现多次，因此规则次数相加不能当作隔离条数。
+
+审核覆盖率为 0/13，人工接受率是 0/0，后者必须显示 N/A。自动规则不能判断回答正确性；目前没有开发者人工审核记录。
+
+报告练习（待开发者亲自验证）：
+
+1. 比较 `quality_report.json` 的 `counts` 与 `dispositions` 的 `GROUP BY status` 查询结果。
+2. 用空文件运行 check，观察保留率为什么是 null，而不是 0%。
+3. 用只有一个合法家族的文件运行 check，查看报告中的 `unassigned`、`split_error` 和 `split_complete`。
+
+## 人工审核闭环：实现说明
+
+这一阶段的工程重点是事务、版本和数据血缘。`labels-import` 在一个 SQLite 事务里锁定当前记录，验证整份 CSV，之后才执行 upsert；任意验证或写入失败都会回滚。相同版本中每个样本只保留最新标签，重复导入不会增加行数。
+
+标签同时绑定 dataset_version、sample_id、content_hash，避免同名样本内容变化后误用旧判断。数据版本标识自动处理结果；review_version 标识数据版本、标签快照和导出代码的组合。更新标签只筛选原来的集合，不重新随机切分。
+
+审核导出先写入临时目录，全部成功才发布到新目录。review_manifest 记录每个文件的哈希；sidecar 将 SFT 第 N 行映射回 sample_id、内容哈希及输入文件行号。这能回答“训练里的这条消息从哪里来、经过了哪次审核”。
+
+SQLite 足以支持本项目的单机演示、关系查询和原子导入。只有出现多人并发写入、远程共享或长期托管需求时，再根据实际需求评估独立数据库服务。
+
+练习（未替开发者完成）：
+
+1. 亲自阅读并审核 3–5 条模板记录，导入后手算覆盖率和接受率，再与报告核对。
+2. 复制模板用于实验，改错一条 content_hash，观察导入失败后已有标签是否保持不变。
+3. 写 SQL 按 label_origin、decision 统计 labels，解释为什么 synthetic_demo 的 accept 不进入训练文件。

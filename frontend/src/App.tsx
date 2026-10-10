@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Download } from 'lucide-react';
 import { getRecords, getRejected, getStats, listRuns, uploadRun } from './api';
 import { ChartPanel } from './components/ChartPanel';
 import { DataTables } from './components/DataTables';
@@ -84,6 +85,16 @@ function App() {
         <div className="version-bar">
           <span>Dataset</span>
           <strong>{versionLabel}</strong>
+          {activeRunId && (
+            <nav className="report-downloads" aria-label="Quality reports">
+              <a href={`/api/runs/${activeRunId}/report?format=json`} download="quality_report.json">
+                <Download size={16} aria-hidden="true" /> JSON report
+              </a>
+              <a href={`/api/runs/${activeRunId}/report?format=md`} download="quality_report.md">
+                <Download size={16} aria-hidden="true" /> Markdown report
+              </a>
+            </nav>
+          )}
         </div>
         <SummaryCards summary={summary} />
         <section className="charts-grid">

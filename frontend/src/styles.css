@@ -122,6 +122,7 @@ main {
 
 .version-bar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   margin: 16px 0;
@@ -130,6 +131,31 @@ main {
 
 .version-bar strong {
   color: #172033;
+}
+
+.report-downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.report-downloads a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  color: #1d4ed8;
+  text-decoration: none;
+}
+
+.report-downloads a:hover {
+  text-decoration: underline;
+}
+
+.report-downloads a:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 3px;
 }
 
 .summary-grid {

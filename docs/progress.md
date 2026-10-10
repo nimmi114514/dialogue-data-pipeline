@@ -58,5 +58,36 @@ python -m dialogue_pipeline check --input data/samples/raw_dialogues.jsonl --out
 
 ### 待完成
 
-- S3 SQLite 与 SQL：版本表、记录表、处置表、重复运行不翻倍、基础 SQL 分析。
+- S3 SQLite 与 SQL 已在后续记录完成。
 - 对 README 做一次全新 clone 后复现检查。
+
+## 2026-10-10 S3 SQLite 与 SQL
+
+### 已完成
+
+- 新增 `pipeline.py`，把读取、验证、清洗和去重流程抽成 `check` 与 `run` 共用的核心。
+- 新增 `storage.py`，使用 Python 标准库 `sqlite3` 写入本地 SQLite。
+- 新增 `run` 命令，支持 `--db artifacts/pipeline.sqlite`。
+- 新增数据库表：`datasets`、`runs`、`records`、`dispositions`。
+- `dispositions` 覆盖每条非空输入行，状态包括 `kept`、`duplicate`、`quarantined`。
+- 新增 `sql/analysis.sql`，包含数据版本摘要、topic 分布、source 分布、处置状态统计、规则统计和运行记录查询。
+- 测试扩展到 10 条，覆盖 SQLite 写入、重复运行不翻倍、SQL topic 统计与 Python summary 对照。
+
+### 实际运行命令
+
+```bash
+python -m pytest
+python -m dialogue_pipeline run --input data/samples/raw_dialogues.jsonl --config configs/default.json --output artifacts/run-s3 --db artifacts/pipeline.sqlite
+```
+
+### 当前结果
+
+- CLI 运行输出：`kept=13 duplicate=1 quarantined=10 blank_lines=1`。
+- 生成数据库：`artifacts/pipeline.sqlite`。
+- 当前样例数据版本：`be9186fe3c72abe6c81f4be8e38d10e12d714f1e2a1ed06233d6d1e46b18ceca`。
+- 测试：`10 passed in 0.73s`。
+
+### 待完成
+
+- S4 泄漏组与 train/validation/test 划分。
+- 为分析 SQL 增加命令行执行或报告导出。

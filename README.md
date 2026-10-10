@@ -24,7 +24,7 @@
 - 合格记录经过文本规范化、模拟邮箱/手机号脱敏和内容哈希计算。
 - 精确重复内容只保留第一条，其余记录为 `duplicate`。
 - 同一个 `sample_id` 对应不同内容时，相关记录全部隔离为 `SAMPLE_ID_CONFLICT`。
-- 输出结果可用作后续 SQLite 入库、SQL 分析、数据划分和质量报告的输入。
+- 输出结果写入 JSONL 文件，也可以持久化到 SQLite 供 SQL 分析使用。
 
 ## 数据格式
 
@@ -91,6 +91,9 @@ raw_dialogues.jsonl
         |
         v
 cleaned.jsonl + summary.json
+        |
+        v
+SQLite datasets / runs / records / dispositions
 ```
 
 ## 项目结构
@@ -102,11 +105,14 @@ dialogue-data-pipeline/
   data/samples/expected_cases.json
   src/dialogue_pipeline/
     __main__.py
+    pipeline.py
     ingest.py
     validate.py
     clean.py
     deduplicate.py
-  tests/test_ingest_validate.py
+    storage.py
+  sql/analysis.sql
+  tests/
   docs/
   pyproject.toml
 ```
@@ -125,7 +131,7 @@ python -m pip install -e ".[dev]"
 PYTHONPATH=src python -m dialogue_pipeline --help
 ```
 
-## 运行
+## 运行文件检查
 
 使用样例数据运行检查：
 
@@ -148,6 +154,26 @@ PYTHONPATH=src python -m dialogue_pipeline check \
 ```text
 check completed: kept=13 duplicate=1 quarantined=10 blank_lines=1 output=artifacts/check
 ```
+
+## 运行并写入 SQLite
+
+`run` 命令会执行同样的数据处理流程，并把结果写入本地 SQLite 数据库：
+
+```bash
+python -m dialogue_pipeline run \
+  --input data/samples/raw_dialogues.jsonl \
+  --config configs/default.json \
+  --output artifacts/run \
+  --db artifacts/pipeline.sqlite
+```
+
+样例输出：
+
+```text
+run completed: dataset_version=... kept=13 duplicate=1 quarantined=10 blank_lines=1 output=artifacts/run db=artifacts/pipeline.sqlite run_id=...
+```
+
+同一份输入、同一份配置和同一份源码重复运行时，`records` 和 `dispositions` 会按同一个 `dataset_version` 替换写入，不会重复膨胀；`runs` 会保留每次运行记录。
 
 严格模式会在存在数据规则问题时返回退出码 `2`：
 
@@ -200,6 +226,40 @@ artifacts/check/
 - 可选的 `canonical_sample_id`
 - 可选的 `content_hash`
 
+## SQLite 表
+
+默认数据库路径由 `--db` 指定，例如：
+
+```text
+artifacts/pipeline.sqlite
+```
+
+核心表：
+
+| 表 | 说明 |
+| --- | --- |
+| `datasets` | 数据版本、输入哈希、配置哈希、源码哈希、摘要 |
+| `runs` | 每次运行的 `run_id`、时间和状态 |
+| `records` | 最终保留的清洗后样本 |
+| `dispositions` | 每条非空输入行的最终处置，包含 `kept`、`duplicate`、`quarantined` |
+
+`dataset_version` 由输入文件哈希、配置哈希和源码哈希计算得到，用于区分不同处理版本。
+
+SQL 示例位于：
+
+```text
+sql/analysis.sql
+```
+
+包含：
+
+- 数据版本摘要。
+- 按 topic 统计保留样本数。
+- source 分布。
+- `kept` / `duplicate` / `quarantined` 状态统计。
+- 规则出现次数。
+- 最近运行记录。
+
 ## 配置
 
 默认配置位于：
@@ -235,6 +295,9 @@ python -m pytest
 - 文本规范化与模拟脱敏。
 - 内容哈希和精确去重。
 - 同 `sample_id` 不同内容冲突。
+- SQLite 写入。
+- 重复运行不重复插入记录。
+- SQL topic 统计与 Python summary 对照。
 
 ## 退出码
 

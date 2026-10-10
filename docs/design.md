@@ -6,7 +6,9 @@
 - `validate.py`：验证单条记录的结构规则，不访问其他记录，不判断回答质量。
 - `clean.py`：对结构合格记录做规范化、模拟脱敏、内容哈希和长度检查。
 - `deduplicate.py`：处理跨记录的精确重复和 `sample_id` 冲突。
-- `__main__.py`：提供 `check` CLI，汇总读取、验证、清洗和去重结果，写出 `cleaned.jsonl`、`accepted.jsonl`、`rejected.jsonl`、`summary.json`。
+- `pipeline.py`：编排读取、验证、清洗、去重，生成文件输出和数据库写入共用的处理结果。
+- `storage.py`：使用 SQLite 保存数据版本、运行记录、保留样本和每条输入最终处置。
+- `__main__.py`：提供 `check` 和 `run` CLI。
 
 ## S1 关键取舍
 
@@ -36,8 +38,20 @@
 
 同 ID 同内容可以按重复处理；同 ID 不同内容全部隔离为 `SAMPLE_ID_CONFLICT`。这个选择比“保留第一条”更保守，因为同一个 ID 指向两段不同内容时，无法确定哪条才是上游真实意图。
 
+## SQLite 存储
+
+`run` 命令会在文件输出之外写入 SQLite。当前表结构保持最小可用：
+
+- `datasets`：保存 `dataset_version`、输入哈希、配置哈希、源码哈希、状态和摘要 JSON。
+- `runs`：保存每次运行的 `run_id`、开始/结束时间和状态。
+- `records`：保存最终保留的清洗后样本，主键为 `(dataset_version, sample_id)`。
+- `dispositions`：保存每条非空输入行的最终处置，主键为 `(dataset_version, source_file_hash, line_number)`。
+
+`dataset_version` 由输入文件哈希、配置哈希和源码哈希生成。同一版本重复运行时，`records` 和 `dispositions` 会先按 `dataset_version` 删除再重写，因此不会翻倍；`runs` 表保留每次运行历史。
+
+当前实现使用 Python 标准库 `sqlite3` 和参数化 SQL。写入包在事务中完成，避免部分表成功、部分表失败后被误认为完整结果。
+
 ## 后续设计点
 
-- S3：SQLite 表结构、事务写入、重复运行不翻倍。
 - S4：泄漏组连通分量、稳定划分和导出。
 - S5：人工标签 CSV 校验、审核通过导出和质量报告。

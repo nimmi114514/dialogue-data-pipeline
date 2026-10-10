@@ -1,0 +1,23 @@
+{
+  "s1_expected": {
+    "candidate_lines": 22,
+    "blank_lines": 1,
+    "accepted_count": 14,
+    "rejected_count": 8,
+    "notes": [
+      "duplicate_id_demo 的两条记录在 S1 结构检查中通过；S2 才处理跨记录 ID 冲突。",
+      "missing_field_001 有 messages 字段，但缺少 assistant，因此应触发 INVALID_ROLE_SEQUENCE。",
+      "bad_json_001 的物理行故意不是合法 JSON，用于验证坏行不阻断后续读取。"
+    ],
+    "expected_rule_ids": {
+      "line_14": ["JSON_PARSE_ERROR"],
+      "missing_field_001": ["INVALID_ROLE_SEQUENCE"],
+      "invalid_type_001": ["INVALID_TYPE"],
+      "empty_content_001": ["EMPTY_CONTENT"],
+      "bad_role_order_001": ["INVALID_ROLE_SEQUENCE"],
+      "unsupported_language_001": ["UNSUPPORTED_LANGUAGE"],
+      "unknown_topic_001": ["UNKNOWN_TOPIC"],
+      "messages_type_001": ["INVALID_TYPE"]
+    }
+  }
+}

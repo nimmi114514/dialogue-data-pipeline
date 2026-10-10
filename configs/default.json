@@ -1,0 +1,13 @@
+{
+  "spec_version": "v1.0",
+  "allowed_topics": [
+    "schedule",
+    "study",
+    "leisure",
+    "explanation",
+    "writing"
+  ],
+  "allowed_language": "zh",
+  "max_message_chars": 2000,
+  "max_dialogue_chars": 8000
+}

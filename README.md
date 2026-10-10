@@ -345,6 +345,33 @@ cd frontend
 npm run build
 ```
 
+## CI
+
+GitHub Actions 配置位于：
+
+```text
+.github/workflows/ci.yml
+```
+
+CI 在 push 到 `main` 和 pull request 时运行两个 job：
+
+| Job | 内容 |
+| --- | --- |
+| `Python tests` | 安装 `.[api,dev]`，运行 `pytest`，运行样例 `check` 和 `run` 命令 |
+| `Frontend build` | 使用 Node 24，执行 `npm ci` 和 `npm run build` |
+
+本地复刻 CI：
+
+```bash
+python -m pytest
+python -m dialogue_pipeline check --input data/samples/raw_dialogues.jsonl --output artifacts/ci-check-local
+python -m dialogue_pipeline run --input data/samples/raw_dialogues.jsonl --config configs/default.json --output artifacts/ci-run-local --db artifacts/ci-local.sqlite
+
+cd frontend
+npm ci
+npm run build
+```
+
 ## 退出码
 
 | 退出码 | 含义 |

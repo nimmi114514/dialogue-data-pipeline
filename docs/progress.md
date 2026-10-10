@@ -122,3 +122,31 @@ cd frontend && npm run build
 
 - 增加端到端浏览器测试或截图验证。
 - 根据后续 S4 划分结果扩展 dashboard 图表。
+
+## 2026-10-10 CI
+
+### 已完成
+
+- 新增 GitHub Actions workflow：`.github/workflows/ci.yml`。
+- CI 触发条件：push 到 `main` 和 pull request。
+- Python job 使用 Python 3.12，安装 `.[api,dev]`，运行 `pytest`，并运行样例 `check` / `run` 命令。
+- Frontend job 使用 Node 24，执行 `npm ci` 和 `npm run build`。
+- README 新增 CI 说明和本地复刻命令。
+
+### 实际运行命令
+
+```bash
+python -m pytest
+python -m dialogue_pipeline check --input data/samples/raw_dialogues.jsonl --output artifacts/ci-check-local
+python -m dialogue_pipeline run --input data/samples/raw_dialogues.jsonl --config configs/default.json --output artifacts/ci-run-local --db artifacts/ci-local.sqlite
+cd frontend && npm ci
+cd frontend && npm run build
+```
+
+### 当前结果
+
+- Python tests：`12 passed`。
+- CLI check：`kept=13 duplicate=1 quarantined=10 blank_lines=1`。
+- CLI run：`kept=13 duplicate=1 quarantined=10 blank_lines=1`。
+- Frontend：`npm ci` 成功，`npm run build` 成功。
+- Vite 仍提示主 bundle 超过 500 kB，暂不阻塞 CI。

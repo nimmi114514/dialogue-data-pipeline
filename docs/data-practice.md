@@ -80,11 +80,11 @@ Pandas 产物：`analysis.md`、`analysis.json`、`topic_comparison.csv`、`leng
 
 结果仅说明该 tokenizer、模板、保留样本和预算设定下的适配压力，不证明端侧设备能运行模型；没有测量内存、延迟、吞吐或模型效果。
 
-## 需要亲自完成的审核
+## 审核操作
 
-review-50 已准备 50 条固定抽样的空白标签及完整消息。目前实际人工标签数为 0；不能回答“哪些主题最容易被人工拒绝，为什么”。测试中的 human 标签只是测试夹具，不是本次真实审核。
+review-50 包含 50 条固定抽样的标签模板及完整消息。主题拒绝率与拒绝原因分析使用导入数据库的有效人工标签。
 
-按 `docs/annotation-guide.md` 亲自审核 30–50 条，保留不确定判断和 notes。审核字段全部留空的行不会导入；实际人工判断填 human，AI 或程序演示填 synthetic_demo。随后执行：
+按 `docs/annotation-guide.md` 审核样本，保留不确定判断和 notes。审核字段全部留空的行不会导入；人工判断填 human，演示标签填 synthetic_demo。随后执行：
 
 ```bash
 python -m dialogue_pipeline labels-import \

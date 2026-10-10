@@ -158,7 +158,7 @@ def process_input(input_path: Path, config_path: Path, config: dict[str, Any]) -
         "leakage_group_count": leakage_group_count,
         "leakage_group_sizes": dict(sorted(leakage_group_sizes.items())),
         "split_error": split_error,
-        "status": "completed_with_data_issues" if non_kept_dispositions else "completed",
+        "status": "split_failed" if split_error else "completed_with_data_issues" if non_kept_dispositions else "completed",
     }
     return PipelineResult(
         cleaned_rows=cleaned_rows,

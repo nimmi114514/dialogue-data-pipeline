@@ -2,6 +2,28 @@
 
 本项目是一个本地运行的中文对话数据处理流水线，用于把原始 JSONL 对话数据转换为可追溯、可检查、可继续入库或分析的结构化结果。
 
+## 数据实践结果
+
+使用固定版本的 [OpenAssistant/OASST1](https://huggingface.co/datasets/OpenAssistant/oasst1)，抽取 1,000 条中文对话路径。自动处理保留 981 条、去重 5 条、隔离 14 条；从保留样本中固定抽取 50 条，阅读全文并检查所有 assistant 回合。
+
+| 样本审核判断 | 条数 | 占已审样本 |
+| --- | ---: | ---: |
+| 接受 | 19 | 38% |
+| 拒绝 | 14 | 28% |
+| 待确认 | 17 | 34% |
+
+接受样本按原有归属导出：train / validation / test 为 **13 / 5 / 1**，SFT 训练文件只包含 13 条 train 对话。50 条来自 46 个泄漏组，覆盖 981 条保留样本的 5.10%；以上比例不是总体正确率。
+
+![OASST1 中文 1000 条对话的 Dashboard](docs/images/dashboard.png)
+
+实际发现：
+
+- **结构合格不等于内容正确。** 一条 Python 回答的循环变量是 `val`，却输出未定义的 `x`；同一对话后续有正确代码也不能消除前文错误，因此拒绝整条训练路径。
+- **关键词主题覆盖不足。** 原始输入的 `other` 占 608/1000；已审的 29 条 `other` 实际包含健康、政治、问候、代码、文学等任务。段落出现年份还会把阅读理解误分到 `schedule`，不能直接用弱主题代表任务类型。
+- **简单加长度门槛会误伤。** 对 50 条做反事实检查，末条回答不足 20 字会拦截 11 条，其中 7 条已经接受，却只命中 14 条拒绝样本中的 1 条。因此没有直接启用该规则。
+
+逐条判断和理由见 [审核记录](data/reviews/oasst1-review50.json)，按主题统计、疑难判断与完整复现命令见 [样本审核与发现](docs/review-findings.md)。来源、清洗前后对照和 token 预算见 [公开数据实践](docs/data-practice.md)。
+
 ## 技术背景
 
 对话数据在进入训练、评测、人工审核或分析系统前，通常需要先完成基础的数据治理：
@@ -28,7 +50,7 @@
 - 输出结果写入 JSONL 文件，也可以持久化到 SQLite 供 SQL 分析使用。
 - 提供本地 Web Dashboard，支持上传 JSONL、运行流水线并查看统计图和明细表。
 - 自动生成 JSON 与 Markdown 质量报告，保留指标分母、统计口径与一致性检查。
-- 使用 CSV 导入人工审核标签，只导出有效人工接受的样本和训练消息。
+- 使用 CSV 导入审核标签，按明确的标签筛选条件导出接受样本和训练消息。
 - 通过固定版本适配器接入公开中文对话，使用 Pandas / SQL 对照分析与固定 tokenizer 评估预算。
 
 ## 数据格式
@@ -141,7 +163,9 @@ dialogue-data-pipeline/
 建议使用 Python 3.11 或更高版本。
 
 ```bash
-python -m pip install -e ".[api,dev]"
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[api,dev,analysis]"
 ```
 
 如果只运行 CLI，也可以不安装包，直接使用：
@@ -293,7 +317,7 @@ python -m dialogue_pipeline export-reviewed \
 
 导入校验版本、内容哈希、枚举、审核人、重复行和决策约束；整批通过才写入。相同样本的新标签覆盖旧标签，空白行不删除旧判断。重新生成报告或从网页下载报告后可查看更新的审核指标；之前导出的报告文件保持原来的快照。
 
-审核导出包含 `reviewed_train.jsonl`、`reviewed_validation.jsonl`、`reviewed_test.jsonl`、`sft_train.jsonl`、`sft_train.sidecar.jsonl`、标签快照、质量报告和 `review_manifest.json`。只有 `human+accept` 样本进入审核通过文件；SFT 只取训练集合。没有人工接受样本时，载荷为空，清单明确说明原因。`synthetic_demo` 标签仅供演示，不计入人工审核。
+审核导出包含 `reviewed_train.jsonl`、`reviewed_validation.jsonl`、`reviewed_test.jsonl`、`sft_train.jsonl`、`sft_train.sidecar.jsonl`、标签快照、质量报告和 `review_manifest.json`。只有与筛选条件匹配的有效 `accept` 样本进入相应集合；SFT 只取训练集合。默认筛选 `human`，本仓库样本审核使用 `--label-origin project_review`；没有匹配的接受样本时，载荷为空，清单说明原因。`synthetic_demo` 仅供测试流程，不进入训练导出。
 
 每次导出使用一个新的输出目录，成功后整体发布。数据版本标识自动处理结果；`review_version` 由数据版本、有效标签快照和导出源码哈希决定。清单记录文件 SHA-256；同一快照重导出载荷一致，标签修改不会重新随机划分数据。
 
@@ -311,11 +335,11 @@ python -m dialogue_pipeline run --input artifacts/oasst-practice/source/dialogue
 
 公开数据使用固定版本的 [OpenAssistant/OASST1](https://huggingface.co/datasets/OpenAssistant/oasst1)，上游许可为 Apache-2.0；下载后保存许可、数据卡、来源映射、筛选计数和 SHA-256。数据与缓存保存在被忽略的 artifacts 中。主题是适配器的关键词弱标注，不是上游人工主题。
 
-`labels-template --sample-size 50 --seed 42` 导出待人工填写的固定抽样；`analyze` 对照清洗前后主题、长度、重复和审核结果并核对 SQL；`token-budget` 使用固定 revision 的 Qwen2.5-0.5B-Instruct tokenizer，分别统计输入、输入加预留输出和完整训练序列的预算超限率，只下载 tokenizer、不加载模型权重。
+`labels-template --sample-size 50 --seed 42` 导出固定抽样；`labels-replay` 将已发布判断绑定到原始文件哈希、样本 ID 和内容哈希一致的新处理版本。`analyze` 对照清洗前后主题、长度、重复和审核结果并核对 SQL；`token-budget` 使用固定 revision 的 Qwen2.5-0.5B-Instruct tokenizer，分别统计输入、输入加预留输出和完整训练序列的预算超限率，只下载 tokenizer、不加载模型权重。
 
-完整命令和实际统计见 [公开数据实践](docs/data-practice.md)。人工审核结果需要真实填写；故意构造的异常样例只用作测试夹具，不能用于评价公开数据质量。
+完整命令和实际统计见 [公开数据实践](docs/data-practice.md) 与 [样本审核与发现](docs/review-findings.md)。故意构造的异常样例只用作测试夹具，不混入公开数据质量统计。
 
-严格模式会在存在数据规则问题时返回退出码 `2`：
+普通模式允许逐行隔离后继续处理；严格模式存在数据规则问题时返回退出码 `2`。切分失败始终返回退出码 `3`，不受 `--strict` 影响；摘要和数据库状态为 `split_failed`，报告的 `split_complete=false`。保留清洗与诊断产物，但不能将空 split 当作成功数据集继续训练。
 
 ```bash
 python -m dialogue_pipeline check \
@@ -504,3 +528,12 @@ npm run build
 | `0` | 命令成功完成；允许存在已隔离的数据问题 |
 | `1` | 系统错误，例如输入文件不存在或配置无法读取 |
 | `2` | `--strict` 模式下发现数据规则问题 |
+| `3` | 切分失败；诊断产物保留，不得将空 split 作为成功结果使用 |
+
+## 使用边界
+
+- 审核只覆盖固定抽样的 50 条，包含相关路径；17 条待确认样本不进入训练导出。数据集许可声明不能替代对第三方转载内容授权的检查。
+- 主题为关键词弱标注，脱敏只覆盖配置中的邮箱与手机号；不检测所有敏感信息、语义近似重复或事实错误。
+- Token 统计只描述固定 tokenizer 和模板下的预算，不代表模型效果、设备内存或推理性能；本项目不执行模型训练。
+- 普通流水线产物逐文件写入，调用方必须检查状态和退出码；审核导出则使用新目录整体发布，避免发布半份审核快照。
+- Web 默认用于本地或可信网络，没有用户认证与多租户隔离；公网部署需额外配置访问控制、上传限额与 TLS。

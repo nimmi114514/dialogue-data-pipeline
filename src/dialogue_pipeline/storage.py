@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS labels (
     complete TEXT NOT NULL CHECK (complete IN ('yes', 'no', 'unsure')),
     decision TEXT NOT NULL CHECK (decision IN ('accept', 'reject', 'unsure')),
     reviewer TEXT NOT NULL,
-    label_origin TEXT NOT NULL CHECK (label_origin IN ('human', 'synthetic_demo')),
+    label_origin TEXT NOT NULL CHECK (label_origin IN ('human', 'project_review', 'synthetic_demo')),
     notes TEXT NOT NULL,
     PRIMARY KEY (dataset_version, sample_id),
     FOREIGN KEY (dataset_version, sample_id) REFERENCES records(dataset_version, sample_id)
@@ -136,7 +136,27 @@ def create_schema(connection: sqlite3.Connection) -> None:
     )
     _ensure_column(connection, "records", "leakage_group_id", "TEXT")
     _ensure_column(connection, "records", "split", "TEXT")
-    connection.execute(LABELS_SCHEMA)
+    with connection:
+        ensure_labels_schema(connection)
+
+
+def ensure_labels_schema(connection: sqlite3.Connection) -> None:
+    schema = connection.execute("SELECT sql FROM sqlite_master WHERE name = 'labels' AND type = 'table'").fetchone()
+    if schema is None:
+        connection.execute(LABELS_SCHEMA)
+    elif "project_review" not in schema[0]:
+        # A savepoint makes DDL atomic both inside and outside an import transaction.
+        connection.execute("SAVEPOINT migrate_labels")
+        try:
+            connection.execute("ALTER TABLE labels RENAME TO labels_legacy")
+            connection.execute(LABELS_SCHEMA)
+            connection.execute("INSERT INTO labels SELECT * FROM labels_legacy")
+            connection.execute("DROP TABLE labels_legacy")
+        except Exception:
+            connection.execute("ROLLBACK TO migrate_labels")
+            connection.execute("RELEASE migrate_labels")
+            raise
+        connection.execute("RELEASE migrate_labels")
 
 
 def load_dataset(db_path: Path, dataset_version: str) -> dict[str, Any]:

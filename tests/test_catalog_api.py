@@ -45,6 +45,18 @@ def test_empty_catalog_and_unknown_source(dashboard):
     assert dashboard.get("/api/sources/missing/download").status_code == 404
 
 
+def test_split_failure_is_visible_in_history_and_report(dashboard):
+    created = upload(dashboard, sample_bytes(1), endpoint="/api/runs").json()
+    assert created["summary"]["status"] == "split_failed"
+    assert created["summary"]["split_error"]
+    history = dashboard.get("/api/runs").json()["items"]
+    assert history[0]["status"] == "split_failed"
+    report = dashboard.get(f"/api/runs/{created['run_id']}/report").json()
+    assert report["status"] == "split_failed"
+    assert report["checks"]["split_complete"] is False
+    assert report["splits"]["unassigned"]["records"] == 1
+
+
 def test_upload_save_rerun_and_download(dashboard):
     content = sample_bytes() + b"\n{broken\n"
     source = upload(dashboard, content).json()

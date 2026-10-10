@@ -164,6 +164,7 @@ function App() {
               </nav>
             </div>
             <SummaryCards summary={activeRun.summary} />
+            {activeRun.summary.split_error && <div className="error" role="alert">Split failed: {activeRun.summary.split_error}</div>}
             {stats ? (
               <section className="charts-grid">
                 <ChartPanel title="Disposition Status" data={stats.status} variant="pie" />

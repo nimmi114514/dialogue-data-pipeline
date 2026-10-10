@@ -35,6 +35,8 @@ def build_report(
     valid_labels = [row for row in labels or [] if hashes.get(row["sample_id"]) == row["content_hash"]]
     human = [row for row in valid_labels if row["label_origin"] == "human"]
     human_decisions = Counter(row["decision"] for row in human)
+    project = [row for row in valid_labels if row["label_origin"] == "project_review"]
+    project_decisions = Counter(row["decision"] for row in project)
     demo_count = sum(row["label_origin"] == "synthetic_demo" for row in valid_labels)
     rules = Counter(reason["rule_id"] for row in dispositions for reason in row["reasons"])
     conflict_count = sum(
@@ -119,7 +121,7 @@ def build_report(
         "summary_status_counts": all(counts[name] == summary[f"{name}_count"] for name in counts),
         "summary_rule_counts": dict(rules) == summary["rule_counts"],
         "valid_label_hashes": len(valid_labels) == len(labels or []),
-        "split_complete": split_counts["unassigned"] == 0,
+        "split_complete": not summary.get("split_error") and split_counts["unassigned"] == 0,
         "no_group_overlap": all(len(names) == 1 for names in group_splits.values()),
         "no_content_hash_overlap": all(len(names) == 1 for names in hash_splits.values()),
     }
@@ -144,11 +146,17 @@ def build_report(
         "leakage_group_sizes": dict(sorted(Counter(row["leakage_group_id"] for row in records if row.get("leakage_group_id")).items())),
         "split_error": summary.get("split_error"),
         "human_review": {
-            "status": "reviewed" if human else "demo_only" if valid_labels else "not_imported",
+            "status": "reviewed" if human else "demo_only" if demo_count else "not_imported",
             "reviewed_count": len(human), "demo_count": demo_count,
             "stale_label_count": len(labels or []) - len(valid_labels),
             "labels_hash": stable_json_hash(sorted(valid_labels, key=lambda row: row["sample_id"])),
             "decision_counts": {name: human_decisions[name] for name in ("accept", "reject", "unsure")},
+        },
+        "project_review": {
+            "reviewed_count": len(project),
+            "decision_counts": {name: project_decisions[name] for name in ("accept", "reject", "unsure")},
+            "coverage": metric(len(project), kept_count),
+            "accept_rate": metric(project_decisions["accept"], len(project)),
         },
         "checks": checks,
         "observations": observations,
@@ -210,6 +218,11 @@ def render_markdown(report: dict[str, Any]) -> str:
         "", "| 决策 | 数量 |", "| --- | ---: |",
     ])
     lines.extend(f"| {name} | {count} |" for name, count in report["human_review"]["decision_counts"].items())
+    project = report.get("project_review", {})
+    if project.get("reviewed_count"):
+        lines.extend(["", "## 样本审核", "", f"审核样本数：{project['reviewed_count']}。", "",
+                      "| 决策 | 数量 |", "| --- | ---: |"])
+        lines.extend(f"| {name} | {count} |" for name, count in project["decision_counts"].items())
     lines.extend(["", "## 统计口径与局限", ""])
     lines.extend(f"- {limitation}" for limitation in report["limitations"])
     lines.extend(["", "## 版本依据", ""])

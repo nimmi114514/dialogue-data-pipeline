@@ -9,8 +9,8 @@ import pytest
 from dialogue_pipeline.__main__ import main
 from dialogue_pipeline.pipeline import process_input
 from dialogue_pipeline.report import load_report
-from dialogue_pipeline.review import LABEL_FIELDS, export_reviewed, export_template, import_labels
-from dialogue_pipeline.storage import load_dataset, save_result
+from dialogue_pipeline.review import LABEL_FIELDS, export_reviewed, export_template, import_labels, replay_labels
+from dialogue_pipeline.storage import LABELS_SCHEMA, ensure_labels_schema, load_dataset, save_result
 
 
 @pytest.fixture
@@ -54,6 +54,94 @@ def test_template_is_unreviewed_and_has_full_dialogue_context(dataset, tmp_path)
     assert samples[0]["messages"] == result.cleaned_rows[0]["record"]["messages"]
     assert import_labels(db, version, output / "labels_template.csv") == 0
     assert load_dataset(db, version)["labels"] == []
+
+
+def test_project_review_migrates_old_database_and_keeps_export_policies_separate(dataset, tmp_path):
+    db, version, result, _ = dataset
+    train = [row for row in result.cleaned_rows if row["split"] == "train"]
+    csv_path = tmp_path / "labels.csv"
+    write_csv(csv_path, [label(train[0], version)])
+    import_labels(db, version, csv_path)
+    with sqlite3.connect(db) as connection:
+        connection.execute("ALTER TABLE labels RENAME TO backup_labels")
+        connection.execute(LABELS_SCHEMA.replace("'human', 'project_review',", "'human',"))
+        connection.execute("INSERT INTO labels SELECT * FROM backup_labels")
+        connection.execute("DROP TABLE backup_labels")
+    write_csv(csv_path, [label(train[1], version, origin="project_review")])
+    assert import_labels(db, version, csv_path) == 1
+    with sqlite3.connect(db) as connection:
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert connection.execute("SELECT COUNT(*) FROM labels").fetchone()[0] == 2
+        assert connection.execute("SELECT name FROM sqlite_master WHERE name = 'labels_legacy'").fetchone() is None
+    report = load_report(db, version)
+    assert report["human_review"]["reviewed_count"] == 1
+    assert report["project_review"]["reviewed_count"] == 1
+    default = tmp_path / "default"
+    export_reviewed(db, version, default)
+    assert read_jsonl(default / "sft_train.sidecar.jsonl")[0]["sample_id"] == train[0]["sample_id"]
+    project = tmp_path / "project"
+    manifest = export_reviewed(db, version, project, label_origin="project_review")
+    assert manifest["label_origin"] == "project_review"
+    assert manifest["reviewed_counts"] == {"train": 1, "validation": 0, "test": 0}
+    assert read_jsonl(project / "sft_train.sidecar.jsonl")[0]["sample_id"] == train[1]["sample_id"]
+    assert read_jsonl(project / "reviewed_train.jsonl")[0]["label_origin"] == "project_review"
+    with pytest.raises(ValueError, match="label_origin"):
+        export_reviewed(db, version, tmp_path / "demo", label_origin="synthetic_demo")
+
+
+@pytest.mark.parametrize("corruption", [None, "source", "content", "missing", "duplicate", "type"])
+def test_replay_binds_only_matching_content_and_preserves_output_on_failure(dataset, tmp_path, corruption):
+    db, version, result, _ = dataset
+    row = label(result.cleaned_rows[0], "old-version", origin="project_review")
+    bundle = {"source_file_hash": result.summary["source_file_hash"], "labels": [row]}
+    if corruption == "source":
+        bundle["source_file_hash"] = "wrong"
+    elif corruption == "content":
+        row["content_hash"] = "wrong"
+    elif corruption == "missing":
+        del row["decision"]
+    elif corruption == "duplicate":
+        bundle["labels"].append(row)
+    elif corruption == "type":
+        row["notes"] = None
+    path = tmp_path / "bundle.json"
+    path.write_text(json.dumps(bundle), encoding="utf-8")
+    output = tmp_path / "bound.csv"
+    output.write_text("previous", encoding="utf-8")
+    if corruption:
+        with pytest.raises(ValueError):
+            replay_labels(db, version, path, output)
+        assert output.read_text() == "previous"
+        assert not list(tmp_path.glob(".labels-*"))
+    else:
+        assert main(["labels-replay", "--db", str(db), "--version", version,
+                     "--input", str(path), "--output", str(output)]) == 0
+        assert import_labels(db, version, output) == 1
+        assert load_dataset(db, version)["labels"][0]["dataset_version"] == version
+
+
+def test_schema_migration_failure_restores_legacy_table(dataset):
+    db, version, result, _ = dataset
+    with sqlite3.connect(db) as connection:
+        connection.execute("DROP TABLE labels")
+        connection.execute(LABELS_SCHEMA.replace("'human', 'project_review',", "'human',"))
+        row = label(result.cleaned_rows[0], version)
+        connection.execute("INSERT INTO labels VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", tuple(row.values()))
+
+    class FailingConnection(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql == "INSERT INTO labels SELECT * FROM labels_legacy":
+                raise sqlite3.OperationalError("simulated copy failure")
+            return super().execute(sql, *args)
+
+    with sqlite3.connect(db, factory=FailingConnection) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        with pytest.raises(sqlite3.OperationalError, match="copy failure"):
+            ensure_labels_schema(connection)
+        schema = connection.execute("SELECT sql FROM sqlite_master WHERE name = 'labels'").fetchone()[0]
+        assert "project_review" not in schema
+        assert connection.execute("SELECT sample_id FROM labels").fetchone()[0] == row["sample_id"]
+        assert connection.execute("SELECT name FROM sqlite_master WHERE name = 'labels_legacy'").fetchone() is None
 
 
 @pytest.mark.parametrize("field,value", [

@@ -1,0 +1,114 @@
+{
+  "dataset_version": "037b686bba7c051c15b8690e45292d68206d95f4463a7a23f60f660b45bc9c95",
+  "source_file_hash": "002de4c55cc84e6890b7fd8fc538ca2f52e73a92de607eacb0a5b96b898710ec",
+  "reviewed_count": 50,
+  "reviewed_group_count": 46,
+  "decision_counts": {
+    "accept": 19,
+    "unsure": 17,
+    "reject": 14
+  },
+  "other_reviewed_count": 29,
+  "other_subtopics": {
+    "ai_concepts": 1,
+    "biography": 1,
+    "computer_architecture": 1,
+    "food": 1,
+    "greeting": 3,
+    "health": 4,
+    "history_resources": 1,
+    "hypothetical_safety": 1,
+    "information_extraction": 1,
+    "language_geography": 1,
+    "law_policy": 1,
+    "literature": 1,
+    "model_identity": 2,
+    "philosophy": 1,
+    "politics": 3,
+    "programming": 1,
+    "reasoning": 1,
+    "roleplay": 1,
+    "science": 1,
+    "text_transformation": 1,
+    "travel": 1
+  },
+  "counterfactual": {
+    "rule": "last assistant answer length < 20 characters",
+    "applied": false,
+    "flagged_count": 11,
+    "flagged_decisions": {
+      "accept": 7,
+      "unsure": 3,
+      "reject": 1
+    },
+    "reject_total": 14,
+    "flagged_samples": [
+      {
+        "sample_id": "oasst1_9835072c-902b-4e62-91ad-cf190ba56e86",
+        "decision": "unsure",
+        "answer_chars": 13,
+        "subtopic": "model_identity"
+      },
+      {
+        "sample_id": "oasst1_d6b31b28-d6f2-44b4-89d8-e3a5797e9147",
+        "decision": "accept",
+        "answer_chars": 7,
+        "subtopic": "creative_writing"
+      },
+      {
+        "sample_id": "oasst1_1acca382-7a58-452e-a214-131f8c7bb4d3",
+        "decision": "accept",
+        "answer_chars": 16,
+        "subtopic": "greeting"
+      },
+      {
+        "sample_id": "oasst1_120ead8f-b934-4b2c-b677-379cf395f627",
+        "decision": "unsure",
+        "answer_chars": 2,
+        "subtopic": "reasoning"
+      },
+      {
+        "sample_id": "oasst1_ec873bec-814b-4130-bd6b-6dd4e11b8a4c",
+        "decision": "reject",
+        "answer_chars": 15,
+        "subtopic": "model_identity"
+      },
+      {
+        "sample_id": "oasst1_a8e50531-d5e6-43c9-bdd3-ec5e100139b5",
+        "decision": "accept",
+        "answer_chars": 7,
+        "subtopic": "roleplay"
+      },
+      {
+        "sample_id": "oasst1_1685f9bf-5ee7-43e6-b0cb-3efd39652d52",
+        "decision": "unsure",
+        "answer_chars": 8,
+        "subtopic": "politics"
+      },
+      {
+        "sample_id": "oasst1_b545cdb7-3edd-4a98-b905-5343d5fe3633",
+        "decision": "accept",
+        "answer_chars": 18,
+        "subtopic": "text_transformation"
+      },
+      {
+        "sample_id": "oasst1_9137d7a3-5ce9-4fb5-adc9-142a913f1ad9",
+        "decision": "accept",
+        "answer_chars": 12,
+        "subtopic": "greeting"
+      },
+      {
+        "sample_id": "oasst1_2ff9293c-fec0-4ca7-b5d5-e237fdfee717",
+        "decision": "accept",
+        "answer_chars": 11,
+        "subtopic": "food"
+      },
+      {
+        "sample_id": "oasst1_1ccc23f4-a1aa-41ec-a747-a4c11f74418e",
+        "decision": "accept",
+        "answer_chars": 12,
+        "subtopic": "philosophy"
+      }
+    ]
+  }
+}

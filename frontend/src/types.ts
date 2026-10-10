@@ -9,6 +9,7 @@ export type Summary = {
   rule_counts: Record<string, number>;
   cleaning_event_counts: Record<string, number>;
   status: string;
+  split_error?: string | null;
 };
 
 export type Run = {

@@ -2,6 +2,7 @@ import copy
 import csv
 import json
 from pathlib import Path
+import runpy
 
 import pytest
 
@@ -92,7 +93,7 @@ def test_pandas_analysis_matches_sql_and_refuses_wrong_raw_file(practice, tmp_pa
     assert report["kept_count"] == 13
     assert all(report["sql_checks"].values())
     assert report["human_review_coverage"]["value"] == 0
-    assert "尚无有效人工标签" in " ".join(report["findings"])
+    assert "没有匹配当前筛选条件的有效标签" in " ".join(report["findings"])
     topic = pd.read_csv(output / "topic_comparison.csv")
     assert topic["raw_count"].sum() == 24
     assert topic["kept_count"].sum() == 13
@@ -174,3 +175,89 @@ def test_token_budget_separates_prompt_target_and_context_reserve():
     assert empty[0]["prompt_over_rate"]["value"] is None
     with pytest.raises(ValueError):
         measure_tokens([], FixtureTokenizer(), [0], 256)
+
+
+def test_token_budget_cli_uses_real_chat_template_offline(practice, tmp_path, monkeypatch):
+    transformers = pytest.importorskip("transformers")
+    tokenizers = pytest.importorskip("tokenizers")
+    import huggingface_hub
+    from dialogue_pipeline import token_budget
+    from dialogue_pipeline.__main__ import main
+
+    cache = tmp_path / "tokenizer"
+    backend = tokenizers.Tokenizer(tokenizers.models.WordLevel({"[UNK]": 0}, unk_token="[UNK]"))
+    tokenizer = transformers.PreTrainedTokenizerFast(
+        tokenizer_object=backend, unk_token="[UNK]",
+        chat_template="{% for message in messages %}{{ message['role'] }}:{{ message['content'] }};{% endfor %}{% if add_generation_prompt %}assistant:{% endif %}",
+    )
+    tokenizer.save_pretrained(cache)
+    files = tuple(path.name for path in cache.iterdir())
+    monkeypatch.setattr(token_budget, "TOKENIZER_FILES", files)
+
+    def local_download(repo, filename, revision, local_dir):
+        assert repo == token_budget.TOKENIZER_REPO
+        assert revision == token_budget.TOKENIZER_REVISION
+        assert local_dir == cache
+        return str(cache / filename)
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", local_download)
+    _, db, result = practice
+    output = tmp_path / "tokens"
+    assert main(["token-budget", "--db", str(db), "--version", result.summary["dataset_version"],
+                 "--output", str(output), "--cache", str(cache), "--budgets", "8", "16"]) == 0
+    report = json.loads((output / "token_budget.json").read_text())
+    assert report["budgets"][0]["sample_count"] == 13
+    assert set(report["tokenizer_files_sha256"]) == set(files)
+
+
+def test_project_analysis_filters_labels_and_checks_sql(practice, tmp_path):
+    pd = pytest.importorskip("pandas")
+    path, db, result = practice
+    version = result.summary["dataset_version"]
+    csv_path = tmp_path / "labels.csv"
+    with csv_path.open("w", newline="") as file_obj:
+        writer = csv.DictWriter(file_obj, fieldnames=LABEL_FIELDS)
+        writer.writeheader()
+        for row, origin in zip(result.cleaned_rows, ("human", "project_review", "synthetic_demo")):
+            writer.writerow({
+                "dataset_version": version, "sample_id": row["sample_id"], "content_hash": row["content_hash"],
+                "relevant": "yes", "complete": "no", "decision": "reject", "reviewer": "fixture",
+                "label_origin": origin, "notes": "fixture rejection",
+            })
+    import_labels(db, version, csv_path)
+    output = tmp_path / "project-analysis"
+    report = analyze_dataset(path, db, version, output, label_origin="project_review")
+    assert report["project_review_coverage"]["numerator"] == 1
+    assert "human_review_coverage" not in report
+    assert all(report["sql_checks"].values())
+    assert list(pd.read_csv(output / "rejection_notes.csv")["sample_id"]) == [result.cleaned_rows[1]["sample_id"]]
+    assert pd.read_csv(output / "project_review_by_topic.csv")["reviewed_count"].sum() == 1
+
+
+def test_review_diagnostics_requires_imported_matching_judgments(practice, tmp_path):
+    pytest.importorskip("pandas")
+    diagnose = runpy.run_path("scripts/review_diagnostics.py")["diagnose"]
+    _, db, result = practice
+    version = result.summary["dataset_version"]
+    row = result.cleaned_rows[0]
+    judgment = dict(zip(LABEL_FIELDS, (
+        version, row["sample_id"], row["content_hash"], "yes", "yes",
+        "accept", "fixture", "project_review", "fixture notes",
+    )))
+    bundle = tmp_path / "bundle.json"
+    bundle.write_text(json.dumps({"source_file_hash": result.summary["source_file_hash"],
+                                  "labels": [{**judgment, "subtopic": "fixture"}]}))
+    output = tmp_path / "diagnostics"
+    with pytest.raises(ValueError, match="not imported"):
+        diagnose(db, version, bundle, output)
+    assert not output.exists()
+    csv_path = tmp_path / "labels.csv"
+    with csv_path.open("w", newline="") as file_obj:
+        writer = csv.DictWriter(file_obj, fieldnames=LABEL_FIELDS)
+        writer.writeheader()
+        writer.writerow(judgment)
+    import_labels(db, version, csv_path)
+    report = diagnose(db, version, bundle, output)
+    assert report["reviewed_count"] == report["reviewed_group_count"] == 1
+    assert report["decision_counts"] == {"accept": 1}
+    assert report["counterfactual"]["applied"] is False

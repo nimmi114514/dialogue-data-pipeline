@@ -23,7 +23,9 @@ jobs:
         run: python -m pip install -e ".[api,dev,analysis]"
 
       - name: Run pytest
-        run: python -m pytest
+        run: |
+          python -m pip check
+          python -m pytest
 
       - name: Run sample CLI pipeline
         run: |

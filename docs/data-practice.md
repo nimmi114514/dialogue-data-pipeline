@@ -2,13 +2,13 @@
 
 ## 来源和边界
 
-使用 [OpenAssistant/OASST1 官方数据集](https://huggingface.co/datasets/OpenAssistant/oasst1)，固定 revision `fdf72ae0827c1cda404aff25b6603abec9e3399b`。[数据卡和许可](https://huggingface.co/datasets/OpenAssistant/oasst1/tree/fdf72ae0827c1cda404aff25b6603abec9e3399b) 标明 Apache-2.0。下载文件、上游 LICENSE / README、SHA-256、原始消息 ID 和抽样方式保存在本地 artifacts；不将完整公开数据或审核者信息提交 Git。
+使用 [OpenAssistant/OASST1 官方数据集](https://huggingface.co/datasets/OpenAssistant/oasst1)，固定 revision `fdf72ae0827c1cda404aff25b6603abec9e3399b`。[数据卡和许可](https://huggingface.co/datasets/OpenAssistant/oasst1/tree/fdf72ae0827c1cda404aff25b6603abec9e3399b) 标明 Apache-2.0。下载文件、上游 LICENSE / README、SHA-256、原始消息 ID 和抽样方式保存在本地 artifacts；不将完整对话原文提交 Git。数据中出现第三方转载声明的样本，另行保留授权疑问，不由数据卡许可直接推定可用。
 
 适配器从消息表重建根节点到 assistant 的完整路径，要求路径元数据为 zh、角色交替、无删除或负面上游审核标记。每个 assistant 节点生成一个样本，共享根节点的路径使用相同 group_id。固定 seed 后按消息 ID 的哈希排序抽样，便于重现。
 
 本次用的是上游 ready-for-export 消息，已有筛选；lang=zh 是上游标签，不是独立语言检测。原始 train / validation 来源保留在 lineage 文件中，本项目为演示重新按家族切分，不把这个结果当作官方 benchmark 划分。上游审核和 rank 不作为本项目的人工审核标签。
 
-主题使用根问题的固定关键词规则，未匹配归为 other。这是弱标注，不是人工主题真值。配置 `configs/oasst1.json` 接受 other，其余长度和分组规则与默认配置一致；模拟脱敏使用清洗模块默认规则。网页上传仍使用默认配置，对照本实践应使用下述 CLI 和专用配置。
+主题使用根问题的固定关键词规则，未匹配归为 other。这是弱标注，不是人工主题真值。配置 `configs/oasst1.json` 接受 other，其余长度和分组规则与默认配置一致；模拟脱敏使用清洗模块默认规则。网页上传可选择 OASST1 profile，或使用 `catalog-add --profile oasst1` 登记本地文件后从下拉框选择。
 
 ## 复现
 
@@ -32,10 +32,22 @@ python -m dialogue_pipeline labels-template \
   --db artifacts/oasst-practice/pipeline.sqlite --version "$PRACTICE_VERSION" \
   --output artifacts/oasst-practice/review-50 --sample-size 50 --seed 42
 
+python -m dialogue_pipeline labels-replay \
+  --db artifacts/oasst-practice/pipeline.sqlite --version "$PRACTICE_VERSION" \
+  --input data/reviews/oasst1-review50.json --output artifacts/oasst-practice/labels.csv
+
+python -m dialogue_pipeline labels-import \
+  --db artifacts/oasst-practice/pipeline.sqlite --version "$PRACTICE_VERSION" \
+  --input artifacts/oasst-practice/labels.csv
+
 python -m dialogue_pipeline analyze \
   --input artifacts/oasst-practice/source/dialogues.jsonl \
   --db artifacts/oasst-practice/pipeline.sqlite --version "$PRACTICE_VERSION" \
-  --output artifacts/oasst-practice/analysis
+  --label-origin project_review --output artifacts/oasst-practice/analysis
+
+python -m dialogue_pipeline export-reviewed \
+  --db artifacts/oasst-practice/pipeline.sqlite --version "$PRACTICE_VERSION" \
+  --label-origin project_review --output artifacts/oasst-practice/reviewed-export
 
 python -m dialogue_pipeline token-budget \
   --db artifacts/oasst-practice/pipeline.sqlite --version "$PRACTICE_VERSION" \
@@ -45,7 +57,7 @@ python -m dialogue_pipeline token-budget \
 
 import-oasst 要求新的输出目录，避免覆盖来源快照；复现时用新的目录或复用已经下载的 source。网络受限于 Hugging Face Xet 时，可以在下载命令前设置 `HF_HUB_DISABLE_XET=1`，通过 HTTPS 获取文件。
 
-基础流水线仍用标准库和 SQLite；Pandas 只在 analyze 中做对照分析。主题、处置、长度、规范化重复和有效人工审核决策均与同一个只读 SQLite 快照核对，结果不一致时分析失败。`sql/practice.sql` 给出可检查、可修改的独立 SQL。
+基础流水线仍用标准库和 SQLite；Pandas 只在分析中做对照。主题、处置、长度、规范化重复和所选类别的有效审核决策均与同一个只读 SQLite 快照核对，结果不一致时分析失败。`sql/practice.sql` 给出可检查、可修改的独立 SQL。
 
 ## 实际自动统计：2026-10-10
 
@@ -59,7 +71,7 @@ import-oasst 要求新的输出目录，避免覆盖来源快照；复现时用�
 - 同一批 986 条规范化候选，清洗前后精确重复冗余均为 5 条，最终保留数据为 0 条。本次没有观察到清洗新增的精确重复，不能推广到其他规则或输入。
 - 原始样本 608/1000 被归为 other，说明关键词主题覆盖有限。其余为 explanation 237、writing 75、study 55、schedule 14、leisure 11；这不是人工主题真值。
 
-Pandas 产物：`analysis.md`、`analysis.json`、`topic_comparison.csv`、`length_summary.csv`、`duplicate_comparison.csv`、`human_review_by_topic.csv`、`rejection_notes.csv`。
+Pandas 产物：`analysis.md`、`analysis.json`、`topic_comparison.csv`、`length_summary.csv`、`duplicate_comparison.csv`、`project_review_by_topic.csv`、`rejection_notes.csv`。
 
 ## Token 预算结果
 
@@ -80,23 +92,12 @@ Pandas 产物：`analysis.md`、`analysis.json`、`topic_comparison.csv`、`leng
 
 结果仅说明该 tokenizer、模板、保留样本和预算设定下的适配压力，不证明端侧设备能运行模型；没有测量内存、延迟、吞吐或模型效果。
 
-## 审核操作
+## 样本审核结果：2026-10-11
 
-review-50 包含 50 条固定抽样的标签模板及完整消息。主题拒绝率与拒绝原因分析使用导入数据库的有效人工标签。
+固定抽样 50 条，阅读完整路径，判断为接受 19 条、拒绝 14 条、待确认 17 条。按原有集合导出接受数据为 train 13、validation 5、test 1，SFT 文件只包含 train。逐条判断见 [审核记录](../data/reviews/oasst1-review50.json)；按主题统计、other 子类型、疑难判断和长度规则取舍见 [样本审核与发现](review-findings.md)。
 
-按 `docs/annotation-guide.md` 审核样本，保留不确定判断和 notes。审核字段全部留空的行不会导入；人工判断填 human，演示标签填 synthetic_demo。随后执行：
+这些判断已通过 `labels-replay` 核对原始输入与内容哈希，再导入数据库并重新分析。本次复现使用安装 `.[api,dev,analysis]` 的干净环境，token-budget 直接成功；2026-10-10 的自动统计口径与此处相同，代码版本变化不影响本次的 981/5/14 处置计数。
 
-```bash
-python -m dialogue_pipeline labels-import \
-  --db artifacts/oasst-practice/pipeline.sqlite --version "$PRACTICE_VERSION" \
-  --input artifacts/oasst-practice/review-50/labels_template.csv
-
-python -m dialogue_pipeline analyze \
-  --input artifacts/oasst-practice/source/dialogues.jsonl \
-  --db artifacts/oasst-practice/pipeline.sqlite --version "$PRACTICE_VERSION" \
-  --output artifacts/oasst-practice/analysis-reviewed
-```
-
-比较主题拒绝率时列出每个主题的已审分母，结合 rejection_notes 中的具体样本、审核者和原因；主题样本太少时保留“不足以比较”的结论。抽样含共享家族路径，不应将其当作完全独立的大样本统计。
+比较主题拒绝率时列出每个主题的已审分母，结合 rejection_notes 中的样本与原因。抽样涉及 46 个泄漏组，不能当作 50 个完全独立的家族；小分母主题不支持总体质量排名。
 
 故意制造异常的 data/samples 文件继续只用于测试，不将其异常比例混入本报告。

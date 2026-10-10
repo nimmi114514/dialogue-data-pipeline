@@ -1,7 +1,8 @@
 -- Bind :dataset_version to the full version in processed/summary.json.
+-- Bind :label_origin to 'project_review' for the published sample review, or 'human'.
 -- Run these against the public-data practice database, not the fault-injection fixtures.
 
--- Human review coverage and rejection ratio within the reviewed subset, by weak topic label.
+-- Review coverage and rejection ratio within the selected subset, by weak topic label.
 SELECT r.topic,
        COUNT(*) AS kept_count,
        COUNT(l.sample_id) AS reviewed_count,
@@ -12,7 +13,7 @@ FROM records r
 LEFT JOIN labels l ON r.dataset_version = l.dataset_version
                   AND r.sample_id = l.sample_id
                   AND r.content_hash = l.content_hash
-                  AND l.label_origin = 'human'
+                  AND l.label_origin = :label_origin
 WHERE r.dataset_version = :dataset_version
 GROUP BY r.topic
 ORDER BY r.topic;
@@ -23,7 +24,7 @@ FROM records r JOIN labels l
   ON r.dataset_version = l.dataset_version AND r.sample_id = l.sample_id
  AND r.content_hash = l.content_hash
 WHERE r.dataset_version = :dataset_version
-  AND l.label_origin = 'human' AND l.decision = 'reject'
+  AND l.label_origin = :label_origin AND l.decision = 'reject'
 ORDER BY r.topic, r.sample_id;
 
 -- Normalized candidate population and extra exact duplicates before resolution.

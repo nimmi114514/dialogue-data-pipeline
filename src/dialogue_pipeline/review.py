@@ -11,7 +11,7 @@ from typing import Any
 
 from .pipeline import source_revision, stable_json_hash
 from .report import build_report, write_report
-from .storage import LABELS_SCHEMA, load_dataset
+from .storage import ensure_labels_schema, load_dataset
 
 
 LABEL_FIELDS = (
@@ -24,6 +24,37 @@ ANNOTATION_FIELDS = LABEL_FIELDS[3:]
 def labels_hash(labels: list[dict[str, Any]]) -> str:
     snapshot = [{key: row[key] for key in LABEL_FIELDS} for row in labels]
     return stable_json_hash(sorted(snapshot, key=lambda row: row["sample_id"]))
+
+
+def replay_labels(db_path: Path, version: str, input_path: Path, output_path: Path) -> int:
+    """Bind published judgments to a matching input and unchanged dialogue contents."""
+    bundle = json.loads(input_path.read_text(encoding="utf-8"))
+    dataset = load_dataset(db_path, version)
+    if not isinstance(bundle, dict) or not isinstance(bundle.get("labels"), list):
+        raise ValueError("Review bundle must contain a labels array.")
+    if bundle.get("source_file_hash") != dataset["summary"]["source_file_hash"]:
+        raise ValueError("Review source SHA-256 mismatch.")
+    hashes = {row["sample_id"]: row["content_hash"] for row in dataset["records"]}
+    try:
+        rows = [{"dataset_version": version, **{key: row[key] for key in LABEL_FIELDS[1:]}}
+                for row in bundle["labels"]]
+    except (KeyError, TypeError) as exc:
+        raise ValueError("Review labels must contain all annotation fields.") from exc
+    if any(not isinstance(value, str) for row in rows for value in row.values()):
+        raise ValueError("Review label fields must be strings.")
+    for row in rows:
+        if hashes.get(row["sample_id"]) != row["content_hash"]:
+            raise ValueError(f"Review content_hash mismatch: {row['sample_id']}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".labels-", dir=output_path.parent) as temporary:
+        staging = Path(temporary) / "labels.csv"
+        with staging.open("w", encoding="utf-8", newline="") as file_obj:
+            writer = csv.DictWriter(file_obj, fieldnames=LABEL_FIELDS)
+            writer.writeheader()
+            writer.writerows(rows)
+        _validate_csv(staging, version, hashes)
+        staging.replace(output_path)
+    return len(rows)
 
 
 def export_template(
@@ -94,7 +125,7 @@ def _validate_csv(
                 raise ValueError(prefix + "relevant/complete must be yes, no or unsure")
             if row["decision"] not in {"accept", "reject", "unsure"}:
                 raise ValueError(prefix + "decision must be accept, reject or unsure")
-            if not row["reviewer"] or row["label_origin"] not in {"human", "synthetic_demo"}:
+            if not row["reviewer"] or row["label_origin"] not in {"human", "project_review", "synthetic_demo"}:
                 raise ValueError(prefix + "reviewer and valid label_origin are required")
             if row["decision"] == "accept" and (row["relevant"] != "yes" or row["complete"] != "yes"):
                 raise ValueError(prefix + "accept requires relevant=yes and complete=yes")
@@ -117,7 +148,7 @@ def import_labels(db_path: Path, version: str, input_path: Path) -> int:
                 "SELECT sample_id, content_hash FROM records WHERE dataset_version = ?", (version,),
             ))
             labels = _validate_csv(input_path, version, hashes)
-            connection.execute(LABELS_SCHEMA)
+            ensure_labels_schema(connection)
             columns = ", ".join(LABEL_FIELDS)
             placeholders = ", ".join("?" for _ in LABEL_FIELDS)
             updates = ", ".join(f"{key} = excluded.{key}" for key in LABEL_FIELDS[2:])
@@ -129,7 +160,11 @@ def import_labels(db_path: Path, version: str, input_path: Path) -> int:
     return len(labels)
 
 
-def export_reviewed(db_path: Path, version: str, output_dir: Path) -> dict[str, Any]:
+def export_reviewed(
+    db_path: Path, version: str, output_dir: Path, label_origin: str = "human",
+) -> dict[str, Any]:
+    if label_origin not in {"human", "project_review"}:
+        raise ValueError("Export label_origin must be human or project_review.")
     dataset = load_dataset(db_path, version)
     summary = dataset["summary"]
     if summary.get("split_error") or any(row.get("split") not in {"train", "validation", "test"} for row in dataset["records"]):
@@ -138,11 +173,12 @@ def export_reviewed(db_path: Path, version: str, output_dir: Path) -> dict[str, 
     valid_labels = [row for row in dataset["labels"] if hashes.get(row["sample_id"]) == row["content_hash"]]
     if len(valid_labels) != len(dataset["labels"]):
         raise ValueError("Stale labels found; import labels matching the current content before export.")
-    accepted = {row["sample_id"] for row in valid_labels if row["label_origin"] == "human" and row["decision"] == "accept"}
+    accepted = {row["sample_id"] for row in valid_labels if row["label_origin"] == label_origin and row["decision"] == "accept"}
     snapshot_hash = labels_hash(valid_labels)
     export_revision = source_revision()
     review_version = stable_json_hash({
         "dataset_version": version, "labels_hash": snapshot_hash, "export_revision": export_revision,
+        "label_origin": label_origin,
     })
     counts = {}
     output_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -158,6 +194,7 @@ def export_reviewed(db_path: Path, version: str, output_dir: Path) -> dict[str, 
                 "sample_id": row["sample_id"], "content_hash": row["content_hash"],
                 "leakage_group_id": row["leakage_group_id"], "split": split,
                 "source_file_hash": row["source_file_hash"], "line_number": row["line_number"],
+                "label_origin": label_origin,
                 "record": json.loads(row["record_json"]),
             } for row in rows]
             _write_jsonl(staging / f"reviewed_{split}.jsonl", payload)
@@ -168,6 +205,7 @@ def export_reviewed(db_path: Path, version: str, output_dir: Path) -> dict[str, 
                     "sft_line_number": index, "dataset_version": version, "review_version": review_version,
                     "sample_id": row["sample_id"], "content_hash": row["content_hash"],
                     "source_file_hash": row["source_file_hash"], "source_line_number": row["line_number"],
+                    "label_origin": label_origin,
                 } for index, row in enumerate(payload, start=1)])
         _write_jsonl(staging / "labels_snapshot.jsonl", valid_labels)
         report = build_report(summary, dataset["records"], dataset["dispositions"], dataset["config"], valid_labels)
@@ -177,7 +215,8 @@ def export_reviewed(db_path: Path, version: str, output_dir: Path) -> dict[str, 
             "labels_hash": snapshot_hash, "source_file_hash": summary["source_file_hash"],
             "config_hash": summary["config_hash"], "pipeline_revision": summary["pipeline_revision"],
             "export_revision": export_revision,
-            "reviewed_counts": counts, "status": "exported" if accepted else "no_human_accepted_samples",
+            "label_origin": label_origin,
+            "reviewed_counts": counts, "status": "exported" if accepted else f"no_{label_origin}_accepted_samples",
             "output_sha256": {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(staging.iterdir())},
         }
         (staging / "review_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")

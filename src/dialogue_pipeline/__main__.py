@@ -10,7 +10,7 @@ from typing import Any
 from .pipeline import PipelineResult, process_input
 from .export import write_outputs
 from .report import load_report, write_report
-from .review import export_reviewed, export_template, import_labels
+from .review import export_reviewed, export_template, import_labels, replay_labels
 from .storage import save_result
 
 
@@ -40,16 +40,21 @@ def main(argv: list[str] | None = None) -> int:
     for command, help_text in (
         ("labels-template", "Export an empty review CSV and dialogue context."),
         ("labels-import", "Validate and atomically import review labels."),
-        ("export-reviewed", "Export human-accepted splits and training messages."),
+        ("export-reviewed", "Export accepted splits and training messages."),
+        ("labels-replay", "Bind published review judgments to matching data."),
     ):
         command_parser = subparsers.add_parser(command, help=help_text)
         command_parser.add_argument("--db", required=True, type=Path)
         command_parser.add_argument("--version", required=True)
-        argument = "--input" if command == "labels-import" else "--output"
+        argument = "--input" if command in {"labels-import", "labels-replay"} else "--output"
         command_parser.add_argument(argument, required=True, type=Path)
+        if command == "labels-replay":
+            command_parser.add_argument("--output", required=True, type=Path)
         if command == "labels-template":
             command_parser.add_argument("--sample-size", type=int)
             command_parser.add_argument("--seed", type=int, default=42)
+        if command == "export-reviewed":
+            command_parser.add_argument("--label-origin", choices=("human", "project_review"), default="human")
 
     source_parser = subparsers.add_parser("import-oasst", help="Download pinned OASST1 and sample Chinese dialogue paths.")
     source_parser.add_argument("--output", required=True, type=Path)
@@ -63,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         command_parser.add_argument("--output", required=True, type=Path)
         if command == "analyze":
             command_parser.add_argument("--input", required=True, type=Path)
+            command_parser.add_argument("--label-origin", choices=("human", "project_review"), default="human")
         else:
             command_parser.add_argument("--cache", type=Path, default=Path("artifacts/external/qwen2.5-0.5b-tokenizer"))
             command_parser.add_argument("--budgets", nargs="+", type=int, default=[512, 1024, 2048, 4096])
@@ -93,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         write_report(args.output, report)
         print(f"report completed: dataset_version={args.version} output={args.output}")
         return 0
-    if args.command in {"labels-template", "labels-import", "export-reviewed"}:
+    if args.command in {"labels-template", "labels-import", "export-reviewed", "labels-replay"}:
         try:
             if args.command == "labels-template":
                 count = export_template(args.db, args.version, args.output, args.sample_size, args.seed)
@@ -101,8 +107,11 @@ def main(argv: list[str] | None = None) -> int:
             elif args.command == "labels-import":
                 count = import_labels(args.db, args.version, args.input)
                 print(f"labels imported: count={count} dataset_version={args.version}")
+            elif args.command == "labels-replay":
+                count = replay_labels(args.db, args.version, args.input, args.output)
+                print(f"labels bound: count={count} output={args.output}")
             else:
-                manifest = export_reviewed(args.db, args.version, args.output)
+                manifest = export_reviewed(args.db, args.version, args.output, args.label_origin)
                 print(f"reviewed export completed: review_version={manifest['review_version']} counts={manifest['reviewed_counts']} output={args.output}")
         except (ValueError, OSError, sqlite3.Error) as exc:
             print(f"{args.command} failed: {exc}", file=sys.stderr)
@@ -116,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"OASST import completed: {result['counts']} output={args.output}")
             elif args.command == "analyze":
                 from .analysis import analyze_dataset
-                result = analyze_dataset(args.input, args.db, args.version, args.output)
+                result = analyze_dataset(args.input, args.db, args.version, args.output, args.label_origin)
                 print(f"Pandas/SQL analysis completed: kept={result['kept_count']} output={args.output}")
             else:
                 from .token_budget import analyze_tokens
@@ -138,7 +147,10 @@ def run_check(input_path: Path, output_dir: Path, config_path: Path, strict: boo
     config = _load_config(config_path)
     result = process_input(input_path, config_path, config)
     write_outputs(output_dir, result, config)
-    _print_summary("check completed", output_dir, result)
+    _print_summary("check split failed" if result.summary["split_error"] else "check completed", output_dir, result)
+    if result.summary["split_error"]:
+        print(result.summary["split_error"], file=sys.stderr)
+        return 3
     if strict and result.rejected_rows:
         return 2
     return 0
@@ -155,7 +167,10 @@ def run_pipeline(
     result = process_input(input_path, config_path, config)
     run_id = save_result(db_path, result, config)
     write_outputs(output_dir, result, config, report=load_report(db_path, result.summary["dataset_version"]))
-    _print_summary("run completed", output_dir, result, db_path=db_path, run_id=run_id)
+    _print_summary("run split failed" if result.summary["split_error"] else "run completed", output_dir, result, db_path=db_path, run_id=run_id)
+    if result.summary["split_error"]:
+        print(result.summary["split_error"], file=sys.stderr)
+        return 3
     if strict and result.rejected_rows:
         return 2
     return 0
@@ -168,7 +183,7 @@ def _add_processing_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Return exit code 2 when any data rule issue is found.",
+        help="Return exit code 2 for data rule issues; split failure always returns 3.",
     )
 
 

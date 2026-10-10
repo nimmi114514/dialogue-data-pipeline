@@ -15,7 +15,7 @@
 | `complete` | `yes`：覆盖明确要求；`no`：遗漏关键要求；`unsure`：无法判断 |
 | `decision` | `accept`、`reject` 或 `unsure` |
 | `reviewer` | 实际审核者的别名 |
-| `label_origin` | 实际人工判断填 `human`；程序、AI 或演示判断填 `synthetic_demo` |
+| `label_origin` | 标签筛选类别：`human`、`project_review` 或 `synthetic_demo`；本仓库样本审核使用 `project_review`，测试演示使用 `synthetic_demo` |
 | `notes` | `reject` / `unsure` 必填具体原因；`accept` 可留空 |
 
 `accept` 必须同时满足 `relevant=yes` 与 `complete=yes`。还应确认没有已知的明显事实错误、危险建议或与问题矛盾的内容；两个 yes 不会强制系统把 decision 改为 accept。
@@ -36,8 +36,10 @@
 
 人工审核覆盖率 = 有效 human 标签数 / 保留样本数；人工接受率 = human+accept 数 / 有效 human 标签数。reject 和 unsure 也属于已审核。没有人工标签时，接受率为 N/A。
 
-`synthetic_demo` 可以验证导入流程，但不计入人工审核指标，也不进入审核通过文件。系统只校验 label_origin 的声明，不能证明填写者真的完成了审核；演示或 AI 生成内容必须如实标记。
+`project_review` 单独汇总为样本审核指标，不混入 human 指标。`synthetic_demo` 可以验证导入流程，但不进入审核通过文件。系统校验版本、内容哈希与标签约束，不自动判断 notes 的事实正确性。
 
-`export-reviewed` 保留原来的 train / validation / test 归属。只有有效 human+accept 记录进入相应 reviewed 文件；`sft_train.jsonl` 只从 reviewed_train 生成，sidecar 将训练行映射回样本和输入行。未审核、reject、unsure 和演示标签均不会进入训练载荷。
+`export-reviewed` 保留原来的 train / validation / test 归属，默认选择 human；导出本仓库样本审核结果时使用 `--label-origin project_review`。只有所选类别中的有效 accept 记录进入相应 reviewed 文件；`sft_train.jsonl` 只从 reviewed_train 生成，sidecar 将训练行映射回样本和输入行。未审核、reject、unsure 和演示标签均不会进入训练载荷，清单与 sidecar 记录实际筛选条件。
+
+已发布的判断可用 `labels-replay --db ... --version ... --input data/reviews/oasst1-review50.json --output artifacts/labels.csv` 绑定到新的处理版本，再用 `labels-import` 导入。原始文件或对应对话内容不一致时拒绝绑定，不会仅替换版本号后套用旧判断。
 
 审核通过仅表示按本指南检查过，不保证所有事实正确或适用于所有场景。SFT 文件仍需训练平台自己的 tokenizer 和 chat template；本项目不执行训练或宣称模型效果提升。

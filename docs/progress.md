@@ -91,3 +91,34 @@ python -m dialogue_pipeline run --input data/samples/raw_dialogues.jsonl --confi
 
 - S4 泄漏组与 train/validation/test 划分。
 - 为分析 SQL 增加命令行执行或报告导出。
+
+## 2026-10-10 Web Dashboard MVP
+
+### 已完成
+
+- 新增 FastAPI 后端 `src/dialogue_pipeline/api.py`。
+- API 支持上传 `.jsonl`、运行现有 Python pipeline、写入 SQLite，并查询 runs、records、rejected、topic/status/rule 统计。
+- 新增 React + Vite + TypeScript 前端，位于 `frontend/`。
+- 前端支持上传 JSONL、显示 summary cards、status/topic/rule 图表、cleaned/rejected 表格和详情面板。
+- 开发模式采用两个进程：`uvicorn dialogue_pipeline.api:app --reload` 和 `npm run dev`。
+- 测试扩展到 12 条，新增 FastAPI 上传和查询接口测试。
+
+### 实际运行命令
+
+```bash
+python -m pip install -e .[api,dev]
+python -m pytest tests/test_api.py tests/test_storage.py tests/test_ingest_validate.py
+cd frontend && npm install
+cd frontend && npm run build
+```
+
+### 当前结果
+
+- 后端测试：`12 passed`。
+- 前端构建成功，输出到 `frontend/dist/`。
+- Vite 构建提示主 bundle 超过 500 kB，MVP 阶段可接受；后续可用动态导入或手动 chunk 优化。
+
+### 待完成
+
+- 增加端到端浏览器测试或截图验证。
+- 根据后续 S4 划分结果扩展 dashboard 图表。

@@ -12,7 +12,7 @@
 - 识别重复内容和冲突 ID。
 - 保留异常数据及原因，方便后续修复或追溯。
 
-项目使用 Python 标准库实现核心流程，CLI 使用 `argparse`，测试使用 `pytest`。当前数据样例均为模拟中文对话，`source=synthetic`。
+项目核心流水线使用 Python 标准库实现，CLI 使用 `argparse`，API 使用 FastAPI，前端使用 React + Vite。当前数据样例均为模拟中文对话，`source=synthetic`。
 
 ## 目标需求
 
@@ -25,6 +25,7 @@
 - 精确重复内容只保留第一条，其余记录为 `duplicate`。
 - 同一个 `sample_id` 对应不同内容时，相关记录全部隔离为 `SAMPLE_ID_CONFLICT`。
 - 输出结果写入 JSONL 文件，也可以持久化到 SQLite 供 SQL 分析使用。
+- 提供本地 Web Dashboard，支持上传 JSONL、运行流水线并查看统计图和明细表。
 
 ## 数据格式
 
@@ -105,12 +106,15 @@ dialogue-data-pipeline/
   data/samples/expected_cases.json
   src/dialogue_pipeline/
     __main__.py
+    api.py
     pipeline.py
     ingest.py
     validate.py
     clean.py
     deduplicate.py
     storage.py
+  frontend/
+    src/
   sql/analysis.sql
   tests/
   docs/
@@ -122,7 +126,7 @@ dialogue-data-pipeline/
 建议使用 Python 3.11 或更高版本。
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[api,dev]"
 ```
 
 如果只运行 CLI，也可以不安装包，直接使用：
@@ -153,6 +157,40 @@ PYTHONPATH=src python -m dialogue_pipeline check \
 
 ```text
 check completed: kept=13 duplicate=1 quarantined=10 blank_lines=1 output=artifacts/check
+```
+
+## 运行 Web Dashboard
+
+开发环境需要两个进程：
+
+```bash
+# terminal 1: backend API
+uvicorn dialogue_pipeline.api:app --reload
+```
+
+```bash
+# terminal 2: frontend
+cd frontend
+npm install
+npm run dev
+```
+
+然后打开：
+
+```text
+http://localhost:5173
+```
+
+如果本机配置了 HTTP proxy，访问本地服务时设置：
+
+```bash
+export NO_PROXY=127.0.0.1,localhost
+```
+
+前端会把 `/api` 请求代理到 `http://127.0.0.1:8000`。后端会把上传文件、运行产物和 dashboard SQLite 写到：
+
+```text
+artifacts/web/
 ```
 
 ## 运行并写入 SQLite
@@ -298,6 +336,14 @@ python -m pytest
 - SQLite 写入。
 - 重复运行不重复插入记录。
 - SQL topic 统计与 Python summary 对照。
+- FastAPI 上传和查询接口。
+
+前端构建：
+
+```bash
+cd frontend
+npm run build
+```
 
 ## 退出码
 

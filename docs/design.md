@@ -8,6 +8,7 @@
 - `deduplicate.py`：处理跨记录的精确重复和 `sample_id` 冲突。
 - `pipeline.py`：编排读取、验证、清洗、去重，生成文件输出和数据库写入共用的处理结果。
 - `storage.py`：使用 SQLite 保存数据版本、运行记录、保留样本和每条输入最终处置。
+- `api.py`：FastAPI 薄后端，负责上传文件、调用 pipeline、写入 SQLite，并提供 dashboard 查询接口。
 - `__main__.py`：提供 `check` 和 `run` CLI。
 
 ## S1 关键取舍
@@ -50,6 +51,32 @@
 `dataset_version` 由输入文件哈希、配置哈希和源码哈希生成。同一版本重复运行时，`records` 和 `dispositions` 会先按 `dataset_version` 删除再重写，因此不会翻倍；`runs` 表保留每次运行历史。
 
 当前实现使用 Python 标准库 `sqlite3` 和参数化 SQL。写入包在事务中完成，避免部分表成功、部分表失败后被误认为完整结果。
+
+## Web Dashboard
+
+可视化采用前后端分离的本地开发模式：
+
+- FastAPI 后端运行在 `http://127.0.0.1:8000`。
+- React/Vite 前端运行在 `http://localhost:5173`。
+- 前端通过 Vite proxy 把 `/api` 请求转发到 FastAPI。
+
+核心数据处理仍然只在 Python pipeline 中实现。React 不重新实现 JSONL 解析、结构验证、清洗、脱敏或去重，避免前后端出现两套规则。
+
+API 层只做薄封装：
+
+- 接收 `.jsonl` 上传。
+- 保存上传文件到 `artifacts/web/uploads/`。
+- 调用 `process_input()`。
+- 调用 `save_result()` 写入 `artifacts/web/dashboard.sqlite`。
+- 提供 runs、records、rejected 和统计查询接口。
+
+React 前端只负责展示和交互：
+
+- 上传 JSONL。
+- 展示 summary cards。
+- 展示 status/topic/rule 图表。
+- 展示 cleaned 和 rejected 表格。
+- 点击行查看详情 JSON。
 
 ## 后续设计点
 

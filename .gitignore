@@ -9,3 +9,6 @@ artifacts/
 .env
 dialogue-data-pipeline-spec.md
 .codex
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo

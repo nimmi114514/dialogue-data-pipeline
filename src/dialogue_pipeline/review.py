@@ -26,13 +26,24 @@ def labels_hash(labels: list[dict[str, Any]]) -> str:
     return stable_json_hash(sorted(snapshot, key=lambda row: row["sample_id"]))
 
 
-def export_template(db_path: Path, version: str, output_dir: Path) -> int:
+def export_template(
+    db_path: Path, version: str, output_dir: Path,
+    sample_size: int | None = None, seed: int = 42,
+) -> int:
     dataset = load_dataset(db_path, version)
+    records = dataset["records"]
+    population = len(records)
+    if sample_size is not None:
+        if sample_size < 1:
+            raise ValueError("sample_size must be positive")
+        records = sorted(records, key=lambda row: (
+            hashlib.sha256(f"{seed}:{row['sample_id']}".encode()).hexdigest(), row["sample_id"],
+        ))[:sample_size]
     output_dir.mkdir(parents=True, exist_ok=True)
     with (output_dir / "labels_template.csv").open("w", encoding="utf-8", newline="") as file_obj:
         writer = csv.DictWriter(file_obj, fieldnames=LABEL_FIELDS)
         writer.writeheader()
-        for row in dataset["records"]:
+        for row in records:
             writer.writerow({
                 "dataset_version": version, "sample_id": row["sample_id"],
                 "content_hash": row["content_hash"],
@@ -40,8 +51,16 @@ def export_template(db_path: Path, version: str, output_dir: Path) -> int:
     samples = [{
         "sample_id": row["sample_id"], "topic": row["topic"], "split": row.get("split"),
         "messages": json.loads(row["messages_json"]),
-    } for row in dataset["records"]]
+    } for row in records]
     _write_jsonl(output_dir / "review_samples.jsonl", samples)
+    selection = {
+        "dataset_version": version, "population_kept": population, "selected_count": len(samples),
+        "requested_sample_size": sample_size, "seed": seed if sample_size is not None else None,
+        "method": "sha256(seed:sample_id), take first N" if sample_size is not None else "all kept records",
+        "sample_ids": [row["sample_id"] for row in records],
+        "status": "unreviewed_template_not_human_labels",
+    }
+    (output_dir / "review_selection.json").write_text(json.dumps(selection, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return len(samples)
 
 

@@ -12,7 +12,7 @@
 - 识别重复内容和冲突 ID。
 - 保留异常数据及原因，方便后续修复或追溯。
 
-项目核心流水线使用 Python 标准库实现，CLI 使用 `argparse`，API 使用 FastAPI，前端使用 React + Vite。当前数据样例均为模拟中文对话，`source=synthetic`。
+项目核心流水线使用 Python 标准库实现，CLI 使用 `argparse`，API 使用 FastAPI，前端使用 React + Vite。仓库内 `data/samples` 是模拟对话和故障注入测试夹具，`source=synthetic`；公开对话通过适配器单独下载到 `artifacts`。
 
 ## 目标需求
 
@@ -29,6 +29,7 @@
 - 提供本地 Web Dashboard，支持上传 JSONL、运行流水线并查看统计图和明细表。
 - 自动生成 JSON 与 Markdown 质量报告，保留指标分母、统计口径与一致性检查。
 - 使用 CSV 导入人工审核标签，只导出有效人工接受的样本和训练消息。
+- 通过固定版本适配器接入公开中文对话，使用 Pandas / SQL 对照分析与固定 tokenizer 评估预算。
 
 ## 数据格式
 
@@ -267,6 +268,24 @@ python -m dialogue_pipeline export-reviewed \
 审核导出包含 `reviewed_train.jsonl`、`reviewed_validation.jsonl`、`reviewed_test.jsonl`、`sft_train.jsonl`、`sft_train.sidecar.jsonl`、标签快照、质量报告和 `review_manifest.json`。只有 `human+accept` 样本进入审核通过文件；SFT 只取训练集合。没有人工接受样本时，载荷为空，清单明确说明原因。`synthetic_demo` 标签仅供演示，不计入人工审核。
 
 每次导出使用一个新的输出目录，成功后整体发布。数据版本标识自动处理结果；`review_version` 由数据版本、有效标签快照和导出源码哈希决定。清单记录文件 SHA-256；同一快照重导出载荷一致，标签修改不会重新随机划分数据。
+
+## 公开数据与预算分析
+
+可选分析依赖独立安装，基础流水线不依赖 Pandas 或模型库：
+
+```bash
+python -m pip install -e ".[analysis]"
+python -m dialogue_pipeline import-oasst --output artifacts/oasst-practice/source --limit 1000 --seed 42
+python -m dialogue_pipeline run --input artifacts/oasst-practice/source/dialogues.jsonl \
+  --config configs/oasst1.json --output artifacts/oasst-practice/processed \
+  --db artifacts/oasst-practice/pipeline.sqlite
+```
+
+公开数据使用固定版本的 [OpenAssistant/OASST1](https://huggingface.co/datasets/OpenAssistant/oasst1)，上游许可为 Apache-2.0；下载后保存许可、数据卡、来源映射、筛选计数和 SHA-256。数据与缓存保存在被忽略的 artifacts 中。主题是适配器的关键词弱标注，不是上游人工主题。
+
+`labels-template --sample-size 50 --seed 42` 导出待人工填写的固定抽样；`analyze` 对照清洗前后主题、长度、重复和审核结果并核对 SQL；`token-budget` 使用固定 revision 的 Qwen2.5-0.5B-Instruct tokenizer，分别统计输入、输入加预留输出和完整训练序列的预算超限率，只下载 tokenizer、不加载模型权重。
+
+完整命令和实际统计见 [公开数据实践](docs/data-practice.md)。人工审核结果需要真实填写；故意构造的异常样例只用作测试夹具，不能用于评价公开数据质量。
 
 严格模式会在存在数据规则问题时返回退出码 `2`：
 

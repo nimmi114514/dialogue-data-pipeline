@@ -40,6 +40,26 @@ def main(argv: list[str] | None = None) -> int:
         command_parser.add_argument("--version", required=True)
         argument = "--input" if command == "labels-import" else "--output"
         command_parser.add_argument(argument, required=True, type=Path)
+        if command == "labels-template":
+            command_parser.add_argument("--sample-size", type=int)
+            command_parser.add_argument("--seed", type=int, default=42)
+
+    source_parser = subparsers.add_parser("import-oasst", help="Download pinned OASST1 and sample Chinese dialogue paths.")
+    source_parser.add_argument("--output", required=True, type=Path)
+    source_parser.add_argument("--cache", type=Path, default=Path("artifacts/external/oasst1"))
+    source_parser.add_argument("--limit", type=int, default=1000)
+    source_parser.add_argument("--seed", type=int, default=42)
+    for command in ("analyze", "token-budget"):
+        command_parser = subparsers.add_parser(command)
+        command_parser.add_argument("--db", required=True, type=Path)
+        command_parser.add_argument("--version", required=True)
+        command_parser.add_argument("--output", required=True, type=Path)
+        if command == "analyze":
+            command_parser.add_argument("--input", required=True, type=Path)
+        else:
+            command_parser.add_argument("--cache", type=Path, default=Path("artifacts/external/qwen2.5-0.5b-tokenizer"))
+            command_parser.add_argument("--budgets", nargs="+", type=int, default=[512, 1024, 2048, 4096])
+            command_parser.add_argument("--output-reserve", type=int, default=256)
 
     args = parser.parse_args(argv)
     if args.command == "check":
@@ -58,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in {"labels-template", "labels-import", "export-reviewed"}:
         try:
             if args.command == "labels-template":
-                count = export_template(args.db, args.version, args.output)
+                count = export_template(args.db, args.version, args.output, args.sample_size, args.seed)
                 print(f"labels template exported: samples={count} output={args.output}")
             elif args.command == "labels-import":
                 count = import_labels(args.db, args.version, args.input)
@@ -66,6 +86,27 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 manifest = export_reviewed(args.db, args.version, args.output)
                 print(f"reviewed export completed: review_version={manifest['review_version']} counts={manifest['reviewed_counts']} output={args.output}")
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            print(f"{args.command} failed: {exc}", file=sys.stderr)
+            return 1
+        return 0
+    if args.command in {"import-oasst", "analyze", "token-budget"}:
+        try:
+            if args.command == "import-oasst":
+                from .adapters import import_oasst
+                result = import_oasst(args.output, args.cache, args.limit, args.seed)
+                print(f"OASST import completed: {result['counts']} output={args.output}")
+            elif args.command == "analyze":
+                from .analysis import analyze_dataset
+                result = analyze_dataset(args.input, args.db, args.version, args.output)
+                print(f"Pandas/SQL analysis completed: kept={result['kept_count']} output={args.output}")
+            else:
+                from .token_budget import analyze_tokens
+                result = analyze_tokens(args.db, args.version, args.output, args.cache, args.budgets, args.output_reserve)
+                print(f"Token budget analysis completed: tokenizer={result['tokenizer_revision']} output={args.output}")
+        except ImportError as exc:
+            print(f"{args.command} failed: install optional dependencies with pip install -e '.[analysis]': {exc}", file=sys.stderr)
+            return 1
         except (ValueError, OSError, sqlite3.Error) as exc:
             print(f"{args.command} failed: {exc}", file=sys.stderr)
             return 1

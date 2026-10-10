@@ -1,0 +1,9 @@
+{
+  "spec_version": "v1.0",
+  "allowed_topics": ["schedule", "study", "leisure", "explanation", "writing", "other"],
+  "allowed_language": "zh",
+  "max_message_chars": 2000,
+  "max_dialogue_chars": 8000,
+  "split_seed": 42,
+  "split_ratios": {"train": 0.8, "validation": 0.1, "test": 0.1}
+}

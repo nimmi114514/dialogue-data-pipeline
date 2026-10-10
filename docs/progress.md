@@ -253,3 +253,16 @@ cd frontend && npm run build
 - `python -m pytest -q`：`44 passed`，此前未完成的 2 条 HTTP 集成测试也已通过。仍有一条 Starlette TestClient 依赖弃用提示。
 - 本次没有浏览器截图或交互点击验证；HTTP 连通检查不能替代完整浏览器验收。
 - Git 工作区恢复可写，准备将质量报告、审核闭环、CI 和对应文档一并提交。私有 spec 和运行产物继续排除。
+
+## 2026-10-10 公开数据、Pandas 与 Token 预算
+
+- 按公开数据实践、Pandas/SQL、固定 tokenizer 的顺序实现；未增加页面，分页保留为开发者练习。
+- 新增 OASST1 固定 revision 适配器和专用配置。保存许可、数据卡、下载哈希、筛选计数、消息链、根节点及上游 split；按消息 ID 固定抽样，根节点绑定 group_id。
+- 从 1,933 条合格中文路径中抽取 1,000 条、370 个根；流水线保留 981、重复 5、隔离 14，最终 366 个泄漏组，train/validation/test 为 784/99/98。
+- 新增 analyze，Pandas 对照主题、同样本字符长度、精确重复和人工审核结果，五类指标与同一 SQLite 只读快照核对，实际全部通过。
+- 新增 labels-template 的 --sample-size / --seed，导出 50 条未填写审核记录和选择清单。实际人工审核为零；未代填个人审核或学习记录。
+- 新增 token-budget，固定 Qwen tokenizer revision 和 transformers 4.57.6，记录文件哈希。981 条保留样本的 512 输入超限为 38，加入 256 输出预留后为 152；1024 对应 6 / 12；2048、4096 为 0 / 0。不下载权重、不推理、不截断。
+- 公开数据、缓存和审核模板均保存在 artifacts；公开文档只记录方法、汇总统计和未完成的真实人工审核边界。故障注入样例仍仅用于测试。
+- 可选依赖放入 analysis extra，基础流水线继续使用原来的标准库架构。CI 安装分析依赖运行离线测试，不在 CI 下载公开数据或模型文件。
+- 验证：`python -m pytest -q` 为 `51 passed`；适配器实际下载、CLI 全流程、真实 tokenizer 计数和 sql/practice.sql 全部运行。现有 TestClient 弃用提示仍存在；未重复构建未改动的前端。
+- 详细命令、实际发现和限制见 docs/data-practice.md。开发者仍需亲自审核、修改规则、写 SQL、记录学习过程，之后才能形成个人实践结论。
